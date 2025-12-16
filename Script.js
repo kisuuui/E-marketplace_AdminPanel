@@ -9,7 +9,7 @@ const firebaseConfig = {
     measurementId: "G-0L7G265Q5F"
 };
 
-const ALLOWED_ADMINS = ["valeriebilo.scc@gmail.com", "justinvenedict.scc@gmail.com", "arnold.scc@gmail.com", "mark.scc@gmail.com"];
+const ALLOWED_ADMINS = ["admin@scc.edu.ph", "justinvenedict.scc@gmail.com"];
 
 // --- INITIALIZATION ---
 let auth, db, storage;
@@ -52,7 +52,6 @@ window.handleLogin = function() {
 };
 
 window.handleLogout = function() {
-    // Optional: Add a confirmation or just logout immediately
     auth.signOut().then(() => window.location.reload());
 };
 
@@ -60,7 +59,7 @@ window.handleLogout = function() {
 auth.onAuthStateChanged(async (user) => {
     const login = document.getElementById('login-screen');
     const dash = document.getElementById('dashboard-container');
-    const sidebar = document.getElementById('mainSidebar');
+    const sidebar = document.getElementById('sidebar');
 
     if (user) {
         if (ALLOWED_ADMINS.some(admin => admin.toLowerCase() === user.email.toLowerCase())) {
@@ -103,13 +102,10 @@ async function fetchAndSyncUserProfile(user) {
 }
 
 function updateProfileUI(name, role, email, photoURL) {
-    // Update all text elements for Name and Role
     document.querySelectorAll('.user-name').forEach(el => el.innerText = name);
     document.querySelectorAll('.user-role').forEach(el => el.innerText = role);
     
-    // Update all avatars (Sidebar, Header, Dropdown, Modal)
     const imgUrl = photoURL || `https://ui-avatars.com/api/?name=${name}&background=852221&color=fff`;
-    
     const avatarIds = ['mp_img', 'sidebar-avatar', 'header-avatar', 'dropdown-avatar'];
     avatarIds.forEach(id => {
         const el = document.getElementById(id);
@@ -152,7 +148,7 @@ function renderProducts() {
             const price = p.Price || p.price || 0;
             const stock = p.Stock || p.stock || 0;
             const status = p.Status || p.status || 'Unknown';
-            return `<tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors"><td class="py-3 pl-2 font-medium text-gray-700">${name}</td><td class="py-3 text-gray-600">$${price}</td><td class="py-3 text-gray-600">${stock}</td><td class="py-3 text-right pr-2"><span class="${getStatusBadge(status)}">${status}</span></td></tr>`;
+            return `<tr class="border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"><td class="py-3 pl-2 font-medium text-gray-700 dark:text-gray-300">${name}</td><td class="py-3 text-gray-600 dark:text-gray-400">₱${price}</td><td class="py-3 text-gray-600 dark:text-gray-400">${stock}</td><td class="py-3 text-right pr-2"><span class="${getStatusBadge(status)}">${status}</span></td></tr>`;
         }).join('');
     }
 
@@ -167,15 +163,15 @@ function renderProducts() {
             const status = p.Status || p.status || 'Unknown';
             
             return `
-            <tr class="table-row-hover group border-b border-gray-50 transition-colors">
+            <tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors">
                 <td class="px-6 py-4 flex items-center gap-3">
                     <img src="${img}" class="w-10 h-10 rounded-lg object-cover border border-gray-100 shadow-sm">
-                    <div><p class="font-bold text-gray-700 text-sm">${name}</p><p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6)}...</p></div>
+                    <div><p class="font-bold text-gray-700 dark:text-gray-300 text-sm">${name}</p><p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6)}...</p></div>
                 </td>
-                <td class="px-6 py-4 text-gray-600">${cat}</td>
-                <td class="px-6 py-4 text-gray-600">${recipient}</td>
-                <td class="px-6 py-4 font-bold text-gray-700">$${price}</td>
-                <td class="px-6 py-4 text-gray-600">${stock}</td>
+                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${cat}</td>
+                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${recipient}</td>
+                <td class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">₱${price}</td>
+                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${stock}</td>
                 <td class="px-6 py-4 text-right"><span class="${getStatusBadge(status)}">${status}</span></td>
                 <td class="px-6 py-4 text-right">
                     <button onclick="deleteItem('products', '${p.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
@@ -204,12 +200,12 @@ function renderUsers() {
         const img = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff`;
 
         const row = `
-        <tr class="border-b border-gray-50 table-row-hover transition-colors">
+        <tr class="border-b border-gray-50 dark:border-dark-border table-row-hover transition-colors">
             <td class="px-6 py-4 flex items-center gap-3">
                 <img src="${img}" class="w-8 h-8 rounded-full shadow-sm">
-                <div><p class="font-bold text-sm text-gray-700">${name}</p><p class="text-xs text-gray-400">${email}</p></div>
+                <div><p class="font-bold text-sm text-gray-700 dark:text-gray-300">${name}</p><p class="text-xs text-gray-400">${email}</p></div>
             </td>
-            <td class="px-6 py-4 text-gray-600">${type}</td>
+            <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${type}</td>
             <td class="px-6 py-4"><span class="badge-${role.toLowerCase()}">${role}</span></td>
             <td class="px-6 py-4">${isVerified ? '<span class="badge-verified">Verified</span>' : '<span class="text-red-500 font-bold text-xs bg-red-50 px-2 py-1 rounded">Unverified</span>'}</td>
             <td class="px-6 py-4 text-right">
@@ -254,14 +250,13 @@ function filterTable(tableId, term) {
     });
 }
 
-// --- DROPDOWN LOGIC (NEW) ---
+// --- DROPDOWN LOGIC ---
 window.toggleUserDropdown = function() {
     const dd = document.getElementById('userDropdown');
     const container = document.getElementById('userMenuContainer');
     
     if (dd.classList.contains('hidden')) {
         dd.classList.remove('hidden');
-        // Add one-time listener to close when clicking outside
         setTimeout(() => {
             document.addEventListener('click', closeUserDropdownOutside);
         }, 10);
@@ -275,14 +270,13 @@ function closeUserDropdownOutside(e) {
     const container = document.getElementById('userMenuContainer');
     const dd = document.getElementById('userDropdown');
     
-    // If click is NOT inside the container, close the menu
     if (container && !container.contains(e.target)) {
         dd.classList.add('hidden');
         document.removeEventListener('click', closeUserDropdownOutside);
     }
 }
 
-// --- SAVE ACTIONS ---
+// --- SAVE ACTIONS (Products, Users, Delete) ---
 window.saveNewProduct = async function() {
     const name = document.getElementById('inp_name').value;
     const price = document.getElementById('inp_price').value;
@@ -376,6 +370,49 @@ window.deleteItem = async function(collection, id) {
     }
 };
 
+// --- SAVE FINANCIAL RECORD (NEW) ---
+window.saveFinancialRecord = async function() {
+    // 1. Get Values
+    const type = document.querySelector('input[name="trans_type"]:checked').value; 
+    const amount = parseFloat(document.getElementById('fin_amount').value);
+    const desc = document.getElementById('fin_desc').value;
+    const dateVal = document.getElementById('fin_date').value;
+
+    // 2. Validation
+    if (!amount || !desc) {
+        return alert("Please enter both an amount and a description.");
+    }
+
+    // 3. Button Feedback
+    const btn = document.querySelector('#addFinanceModal button.bg-[#852221]');
+    const originalText = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+        let recordDate = dateVal ? new Date(dateVal) : new Date();
+        
+        await db.collection('financials').add({
+            type: type,          
+            amount: amount,      
+            description: desc,   
+            date: recordDate,    
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdBy: auth.currentUser ? auth.currentUser.email : 'System'
+        });
+
+        alert("Transaction Saved Successfully!");
+        closeAndClearModal('addFinanceModal');
+
+    } catch (error) {
+        console.error("Error saving finance record:", error);
+        alert("Error: " + error.message);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+};
+
 // --- MODAL & TAB UTILS ---
 window.switchView = function(viewName) {
     document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
@@ -384,7 +421,7 @@ window.switchView = function(viewName) {
     if(target) target.classList.remove('hidden');
 
     document.querySelectorAll('.nav-item').forEach(el => {
-        el.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-gray-50 text-gray-600 cursor-pointer transition-colors group';
+        el.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-border text-gray-600 dark:text-gray-400 cursor-pointer transition-colors group';
         const icon = el.querySelector('i');
         if(icon) {
              icon.classList.remove('text-white');
@@ -394,21 +431,19 @@ window.switchView = function(viewName) {
 
     const activeNav = document.getElementById('nav-' + viewName);
     if(activeNav) {
-        activeNav.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg bg-[#852221] text-white cursor-pointer shadow-md shadow-red-100 transition-colors';
+        activeNav.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg active cursor-pointer transition-colors';
         const icons = activeNav.querySelectorAll('i');
         icons.forEach(i => i.classList.remove('group-hover:text-[#852221]'));
     }
     
-    // Close user dropdown if open
     document.getElementById('userDropdown').classList.add('hidden');
-
     lucide.createIcons();
 };
 
 window.switchUserTab = function(type) {
     currentTab = type;
     document.querySelectorAll('[id^="tab-"]').forEach(b => {
-        b.className = 'page-tab-inactive pb-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 transition-colors cursor-pointer';
+        b.className = 'page-tab-inactive pb-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer';
         if(b.id === 'tab-unverified') b.classList.add('text-red-500');
     });
 
@@ -416,7 +451,7 @@ window.switchUserTab = function(type) {
     if(activeBtn) {
         activeBtn.className = (type === 'unverified') 
             ? 'page-tab-active-danger pb-3 text-sm font-bold border-b-2 border-red-500 text-red-600 cursor-pointer' 
-            : 'page-tab-active pb-3 text-sm font-bold border-b-2 border-[#852221] text-[#852221] cursor-pointer';
+            : 'page-tab-active pb-3 text-sm font-bold border-b-2 border-[#852221] text-[#852221] dark:text-red-400 cursor-pointer';
     }
 
     document.getElementById('tbody-customers').classList.add('hidden');
@@ -427,7 +462,17 @@ window.switchUserTab = function(type) {
     if(targetBody) targetBody.classList.remove('hidden');
 };
 
-window.openModal = function(id) { document.getElementById(id)?.classList.add('open'); document.getElementById('userDropdown').classList.add('hidden'); };
+window.openModal = function(id) { 
+    document.getElementById(id)?.classList.add('open'); 
+    document.getElementById('userDropdown').classList.add('hidden'); 
+    
+    // Set default date for finance modal
+    if(id === 'addFinanceModal') {
+        const dateInput = document.getElementById('fin_date');
+        if(dateInput) dateInput.valueAsDate = new Date();
+    }
+};
+
 window.closeModal = function(id) { document.getElementById(id)?.classList.remove('open'); };
 window.closeAndClearModal = function(id) {
     document.querySelectorAll(`#${id} input, #${id} textarea`).forEach(i => i.value = '');
@@ -489,13 +534,98 @@ window.saveMyProfile = async function() {
     } catch(e) { alert(e.message); } finally { btn.textContent = "Update"; btn.disabled = false; }
 };
 
+// --- DARK MODE LOGIC ---
+function toggleTheme() {
+    const html = document.documentElement;
+    const themeIcon = document.getElementById('theme-icon');
+    
+    if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+        if(themeIcon) themeIcon.setAttribute('data-lucide', 'moon'); 
+    } else {
+        html.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+        if(themeIcon) themeIcon.setAttribute('data-lucide', 'sun'); 
+    }
+    lucide.createIcons(); 
+}
+
+// Check saved theme on load
+if (localStorage.getItem('theme') === 'dark') {
+    document.documentElement.classList.add('dark');
+}
+
+// --- CALENDAR LOGIC (Interactive) ---
+let currentCalendarDate = new Date(); 
+let selectedFullDate = new Date(); 
+
+function renderCalendar() {
+    const monthYearEl = document.getElementById("calendar-month");
+    const gridEl = document.getElementById("calendar-grid");
+    
+    if (!monthYearEl || !gridEl) return;
+
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    monthYearEl.innerText = `${monthNames[month]} ${year}`;
+
+    gridEl.innerHTML = "";
+
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    
+    for (let i = 0; i < firstDayIndex; i++) {
+        const blank = document.createElement("span");
+        gridEl.appendChild(blank);
+    }
+
+    const today = new Date();
+
+    for (let i = 1; i <= lastDay; i++) {
+        const dayEl = document.createElement("span");
+        dayEl.innerText = i;
+        dayEl.className = "w-8 h-8 flex items-center justify-center rounded-full mx-auto cursor-pointer transition-all duration-200 text-sm";
+        
+        const isSelected = (i === selectedFullDate.getDate() && month === selectedFullDate.getMonth() && year === selectedFullDate.getFullYear());
+        const isToday = (i === today.getDate() && month === today.getMonth() && year === today.getFullYear());
+
+        if (isSelected) {
+            dayEl.classList.add("bg-[#852221]", "text-white", "shadow-md", "shadow-red-200", "dark:shadow-none", "font-bold");
+        } else if (isToday) {
+            dayEl.classList.add("text-[#852221]", "font-bold", "border", "border-red-100", "dark:border-red-900");
+        } else {
+            dayEl.classList.add("hover:bg-gray-100", "dark:hover:bg-gray-800", "text-gray-600", "dark:text-gray-300");
+        }
+
+        dayEl.onclick = () => selectDay(i);
+        gridEl.appendChild(dayEl);
+    }
+}
+
+function selectDay(day) {
+    selectedFullDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), day);
+    renderCalendar();
+    console.log(`User selected: ${selectedFullDate.toDateString()}`);
+}
+
+function changeMonth(direction) {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
+    renderCalendar();
+}
+
+// --- INITIALIZE (Final Loaded Sequence) ---
 document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     setupSearch();
     
+    // Media Upload
     const mediaArea = document.querySelector('.media-upload-area');
     if(mediaArea) mediaArea.addEventListener('click', () => document.getElementById('inp_file').click());
     
+    // Profile Image Preview
     const mpFile = document.getElementById('mp_file');
     if(mpFile) {
         mpFile.addEventListener('change', (e) => {
@@ -508,5 +638,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-});
+    // Init Calendar
+    if(typeof renderCalendar === "function") renderCalendar();
 
+    // Init Chart (Flat/Zero)
+    const ctx = document.getElementById('financeChart');
+    if(ctx) {
+        if (window.myFinanceChart) window.myFinanceChart.destroy();
+        window.myFinanceChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Week 01', 'Week 02', 'Week 03', 'Week 04'],
+                datasets: [
+                    { label: 'Income', data: [0, 0, 0, 0], backgroundColor: '#852221', borderRadius: 4, barPercentage: 0.6 },
+                    { label: 'Outcome', data: [0, 0, 0, 0], backgroundColor: '#e2e8f0', borderRadius: 4, barPercentage: 0.6 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', align: 'start', labels: { usePointStyle: true } } },
+                scales: { y: { beginAtZero: true, max: 10000, grid: { borderDash: [5, 5] } }, x: { grid: { display: false } } }
+            }
+        });
+    }
+});
