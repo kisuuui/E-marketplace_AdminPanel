@@ -68,7 +68,6 @@
     <div id="login-screen">
         <div class="w-full max-w-sm bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
             <div class="text-center mb-8">
-               
                 <img src="logo.png" class="mx-auto mb-4 object-contain h-24 w-auto" alt="SCC Logo">
                 <h2 class="text-xl font-bold text-gray-800">Admin Portal</h2>
                 <p class="text-gray-400 text-xs mt-1">Please sign-in to your account</p>
@@ -90,15 +89,11 @@
     
     <div id="myProfileModal" class="modal-overlay"><div class="modal-content" style="max-width:400px"><div class="flex justify-between items-center px-6 py-4 border-b"><h3 class="text-lg font-bold">My Profile</h3><button onclick="closeModal('myProfileModal')" class="p-1 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 flex flex-col items-center gap-4"><div class="relative"><img id="mp_img" src="" class="w-24 h-24 rounded-full bg-gray-200 object-cover border-4 border-white shadow-lg"><button onclick="document.getElementById('mp_file').click()" class="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full hover:bg-red-900"><i data-lucide="camera" class="w-4 h-4"></i></button></div><input type="file" id="mp_file" class="hidden"><input id="mp_name" class="form-input text-center font-bold text-lg" placeholder="Full Name"><input id="mp_email" class="form-input bg-gray-50 text-center text-gray-500 text-xs" readonly><div class="grid grid-cols-2 gap-4 w-full"><input id="mp_role" class="form-input bg-gray-50 text-xs text-center" readonly><input id="mp_uid" class="form-input bg-gray-50 text-xs text-center" readonly></div></div><div class="px-6 py-4 bg-gray-50 flex justify-end gap-2"><button onclick="closeModal('myProfileModal')" class="px-4 py-2 border rounded-lg text-gray-600">Close</button><button onclick="saveMyProfile()" class="px-4 py-2 bg-primary text-white rounded-lg">Update Profile</button></div></div></div>
 
-
     <aside id="sidebar" class="bg-white flex flex-col border-r border-gray-200 z-20 flex-shrink-0 w-64">
         <div id="sidebarToggle" class="h-16 flex items-center justify-between px-6 mb-2 cursor-pointer hover:bg-gray-50/50 transition-colors group">
-            <div class="flex items-center gap-2 overflow-hidden w-full">
-                
+            <div class="flex items-center gap-3 w-full">
                 <img src="logo.png" class="w-8 h-8 object-contain" alt="SCC Logo">
-                <span class="brand-text text-lg font-bold text-gray-700 tracking-tight">SCC <span class="text-primary">E-COMMERCE</span>
-    </span>
-</div>
+                <span class="brand-text text-lg font-bold text-gray-700 tracking-tight">SCC <span class="text-primary">E-COMMERCE</span></span>
             </div>
         </div>
 
@@ -216,81 +211,43 @@
 
         <div class="flex-1 overflow-auto p-6 relative">
             
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
-        <div class="flex justify-between items-start mb-4">
-            <div>
-                <p class="text-gray-500 text-sm font-medium">Total Revenue</p>
-                <h3 class="text-2xl font-bold text-gray-800 mt-1">₱41,532</h3>
-            </div>
-            <button class="p-2 bg-green-50 rounded-lg text-green-600">
-                <i data-lucide="banknote" class="w-5 h-5"></i>
-            </button>
-        </div>
-        <div class="flex items-end gap-1 h-8 opacity-50">
-            <div class="w-1 bg-green-500 h-3 rounded-t"></div>
-            <div class="w-1 bg-green-500 h-5 rounded-t"></div>
-            <div class="w-1 bg-green-500 h-8 rounded-t"></div>
-            <div class="w-1 bg-green-500 h-6 rounded-t"></div>
-            <div class="w-1 bg-green-500 h-9 rounded-t"></div>
-        </div>
-    </div>
+            <div id="view-dashboard" class="view-section active-view">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 text-sm font-medium">Total Revenue</p><h3 class="text-2xl font-bold text-gray-800 mt-1">₱1,245,000</h3></div>
+                            <button class="p-2 bg-green-50 rounded-lg text-green-600"><i data-lucide="banknote" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-green-500 h-3 rounded-t"></div><div class="w-1 bg-green-500 h-5 rounded-t"></div><div class="w-1 bg-green-500 h-8 rounded-t"></div><div class="w-1 bg-green-500 h-6 rounded-t"></div><div class="w-1 bg-green-500 h-9 rounded-t"></div></div>
+                    </div>
 
-    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
-        <div class="flex justify-between items-start mb-4">
-            <div>
-                <p class="text-gray-500 text-sm font-medium">Total Orders</p>
-                <h3 class="text-2xl font-bold text-gray-800 mt-1">7,890</h3>
-            </div>
-            <button class="p-2 bg-red-50 rounded-lg text-[#852221]">
-                <i data-lucide="shopping-cart" class="w-5 h-5"></i>
-            </button>
-        </div>
-        <div class="flex items-end gap-1 h-8 opacity-50">
-            <div class="w-1 bg-[#852221] h-3 rounded-t"></div>
-            <div class="w-1 bg-[#852221] h-5 rounded-t"></div>
-            <div class="w-1 bg-[#852221] h-8 rounded-t"></div>
-            <div class="w-1 bg-[#852221] h-4 rounded-t"></div>
-        </div>
-    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 text-sm font-medium">Total Orders</p><h3 class="text-2xl font-bold text-gray-800 mt-1">7,890</h3></div>
+                            <button class="p-2 bg-red-50 rounded-lg text-[#852221]"><i data-lucide="shopping-cart" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-[#852221] h-3 rounded-t"></div><div class="w-1 bg-[#852221] h-5 rounded-t"></div><div class="w-1 bg-[#852221] h-8 rounded-t"></div><div class="w-1 bg-[#852221] h-4 rounded-t"></div></div>
+                    </div>
 
-    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
-        <div class="flex justify-between items-start mb-4">
-            <div>
-                <p class="text-gray-500 text-sm font-medium">Active Products</p>
-                <h3 class="text-2xl font-bold text-gray-800 mt-1">125</h3>
-            </div>
-            <button class="p-2 bg-blue-50 rounded-lg text-blue-600">
-                <i data-lucide="package" class="w-5 h-5"></i>
-            </button>
-        </div>
-        <div class="flex items-end gap-1 h-8 opacity-50">
-            <div class="w-1 bg-blue-500 h-2 rounded-t"></div>
-            <div class="w-1 bg-blue-500 h-6 rounded-t"></div>
-            <div class="w-1 bg-blue-500 h-3 rounded-t"></div>
-        </div>
-    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 text-sm font-medium">Active Products</p><h3 class="text-2xl font-bold text-gray-800 mt-1">125</h3></div>
+                            <button class="p-2 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="package" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-blue-500 h-2 rounded-t"></div><div class="w-1 bg-blue-500 h-6 rounded-t"></div><div class="w-1 bg-blue-500 h-3 rounded-t"></div></div>
+                    </div>
 
-    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
-        <div class="flex justify-between items-start mb-4">
-            <div>
-                <p class="text-gray-500 text-sm font-medium">Weekly Sales</p>
-                <h3 class="text-2xl font-bold text-gray-800 mt-1">₱12,695</h3>
-            </div>
-            <button class="p-2 bg-orange-50 rounded-lg text-orange-500">
-                <i data-lucide="trending-up" class="w-5 h-5"></i>
-            </button>
-        </div>
-        <div class="flex items-end gap-1 h-8 opacity-50">
-            <div class="w-1 bg-orange-500 h-4 rounded-t"></div>
-            <div class="w-1 bg-orange-500 h-7 rounded-t"></div>
-            <div class="w-1 bg-orange-500 h-5 rounded-t"></div>
-        </div>
-    </div>
-</div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 text-sm font-medium">Weekly Sales</p><h3 class="text-2xl font-bold text-gray-800 mt-1">₱12,695</h3></div>
+                            <button class="p-2 bg-orange-50 rounded-lg text-orange-500"><i data-lucide="trending-up" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-orange-500 h-4 rounded-t"></div><div class="w-1 bg-orange-500 h-7 rounded-t"></div><div class="w-1 bg-orange-500 h-5 rounded-t"></div></div>
+                    </div>
+                </div>
 
-                <div class="grid grid-cols-3 gap-6">
-                    <div class="col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
                         <div class="flex justify-between items-center mb-6">
                             <h3 class="font-bold text-gray-800">Popular Products</h3>
                             <button class="text-gray-400 hover:text-gray-600"><i data-lucide="more-horizontal" class="w-5 h-5"></i></button>
@@ -300,10 +257,10 @@
                             <tbody class="text-sm"></tbody>
                         </table>
                     </div>
-                     <div class="col-span-1 bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col items-center justify-center text-center">
+                    <div class="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col items-center justify-center text-center">
                         <div class="flex justify-between w-full mb-4"><h3 class="font-bold text-gray-800">Goals</h3></div>
                         <div class="relative w-32 h-32 flex items-center justify-center mb-4">
-                             <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                                 <path class="text-gray-100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="2.5" />
                                 <path class="text-[#852221]" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="84, 100" />
                             </svg>
@@ -376,4 +333,3 @@
 </body>
 
 </html>
-
