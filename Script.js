@@ -12,7 +12,8 @@ const firebaseConfig = {
 const ALLOWED_ADMINS = ["admin@scc.edu.ph", "justinvenedict.scc@gmail.com"];
 
 // --- INITIALIZATION ---
-let auth, db, storage;
+let auth, db; 
+// Note: 'storage' is removed because we are now using Cloudinary
 
 try {
     if (!firebase.apps.length) {
@@ -20,7 +21,6 @@ try {
     }
     auth = firebase.auth();
     db = firebase.firestore();
-    storage = firebase.storage();
     console.log("Firebase Active");
 } catch (e) {
     console.error("Init Error:", e);
@@ -28,6 +28,32 @@ try {
 
 let globalUsers = [], globalProducts = [];
 let currentTab = 'customers';
+
+// --- CLOUDINARY UPLOAD HELPER (NEW) ---
+async function uploadToCloudinary(file) {
+    const cloudName = "dokaqnqg6"; 
+    const uploadPreset = "e-marketplace";
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", uploadPreset);
+
+    try {
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+            method: "POST",
+            body: formData
+        });
+
+        if (!response.ok) throw new Error("Cloudinary Upload Failed");
+
+        const data = await response.json();
+        return data.secure_url; // Returns the internet-ready link
+        
+    } catch (error) {
+        console.error("Upload Error:", error);
+        throw error;
+    }
+}
 
 // --- AUTHENTICATION ---
 window.handleLogin = function() {
@@ -276,7 +302,7 @@ function closeUserDropdownOutside(e) {
     }
 }
 
-// --- SAVE ACTIONS (Products, Users, Delete) ---
+// --- SAVE ACTIONS (Products via Cloudinary) ---
 window.saveNewProduct = async function() {
     const name = document.getElementById('inp_name').value;
     const price = document.getElementById('inp_price').value;
@@ -291,13 +317,16 @@ window.saveNewProduct = async function() {
     saveBtn.disabled = true;
 
     try {
-        let url = "";
+        let imageUrl = "";
+
+        // 1. UPLOAD TO CLOUDINARY
         if (file) {
-            const ref = storage.ref('products/' + Date.now() + '_' + file.name);
-            await ref.put(file);
-            url = await ref.getDownloadURL();
+            imageUrl = await uploadToCloudinary(file);
+        } else {
+            imageUrl = `https://ui-avatars.com/api/?name=${name}&background=eee`;
         }
         
+        // 2. SAVE TO FIREBASE
         await db.collection('products').add({
             Product: name, 
             Price: Number(price),
@@ -306,7 +335,7 @@ window.saveNewProduct = async function() {
             Status: document.getElementById('inp_status').value,
             Recipient: document.getElementById('inp_recipient').value,
             Description: document.getElementById('inp_desc').value,
-            Image: url,
+            Image: imageUrl, 
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
@@ -372,18 +401,15 @@ window.deleteItem = async function(collection, id) {
 
 // --- SAVE FINANCIAL RECORD (NEW) ---
 window.saveFinancialRecord = async function() {
-    // 1. Get Values
     const type = document.querySelector('input[name="trans_type"]:checked').value; 
     const amount = parseFloat(document.getElementById('fin_amount').value);
     const desc = document.getElementById('fin_desc').value;
     const dateVal = document.getElementById('fin_date').value;
 
-    // 2. Validation
     if (!amount || !desc) {
         return alert("Please enter both an amount and a description.");
     }
 
-    // 3. Button Feedback
     const btn = document.querySelector('#addFinanceModal button.bg-[#852221]');
     const originalText = btn.textContent;
     btn.textContent = "Saving...";
@@ -523,9 +549,7 @@ window.saveMyProfile = async function() {
     try {
         let url = null;
         if(file) {
-             const ref = storage.ref('profiles/'+u.uid);
-             await ref.put(file);
-             url = await ref.getDownloadURL();
+             url = await uploadToCloudinary(file);
         }
         await db.collection('admin').doc(u.uid).update({ name, ...(url && {photoURL: url}) });
         updateProfileUI(name, document.getElementById('mp_role').value, u.email, url || document.getElementById('mp_img').src);
