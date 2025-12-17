@@ -1,689 +1,483 @@
-// --- CONFIGURATION ---
-const firebaseConfig = {
-    apiKey: "AIzaSyC75Zmb17vj7K3HeQKiHxbKvAzGIQmqQw4",
-    authDomain: "e-campus-marketplace.firebaseapp.com",
-    projectId: "e-campus-marketplace",
-    storageBucket: "e-campus-marketplace.firebasestorage.app",
-    messagingSenderId: "920245597144",
-    appId: "1:920245597144:web:b2d1b5a74d562968f478ad",
-    measurementId: "G-0L7G265Q5F"
-};
-
-const ALLOWED_ADMINS = ["admin@scc.edu.ph", "justinvenedict.scc@gmail.com"];
-
-// --- INITIALIZATION ---
-let auth, db; 
-// Note: 'storage' is removed because we are now using Cloudinary
-
-try {
-    if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    }
-    auth = firebase.auth();
-    db = firebase.firestore();
-    console.log("Firebase Active");
-} catch (e) {
-    console.error("Init Error:", e);
-}
-
-let globalUsers = [], globalProducts = [];
-let currentTab = 'customers';
-
-// --- CLOUDINARY UPLOAD HELPER (NEW) ---
-async function uploadToCloudinary(file) {
-    const cloudName = "dokaqnqg6"; 
-    const uploadPreset = "e-marketplace";
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", uploadPreset);
-
-    try {
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: "POST",
-            body: formData
-        });
-
-        if (!response.ok) throw new Error("Cloudinary Upload Failed");
-
-        const data = await response.json();
-        return data.secure_url; // Returns the internet-ready link
-        
-    } catch (error) {
-        console.error("Upload Error:", error);
-        throw error;
-    }
-}
-
-// --- AUTHENTICATION ---
-window.handleLogin = function() {
-    const e = document.getElementById('loginEmail').value.trim();
-    const p = document.getElementById('loginPassword').value;
-    const btn = document.getElementById('loginBtn');
-    const errorMsg = document.getElementById('loginError');
-
-    if (btn) btn.textContent = "Verifying...";
-    if (errorMsg) errorMsg.classList.add('hidden');
-
-    auth.signInWithEmailAndPassword(e, p)
-        .catch(err => {
-            console.error("Login Failed", err);
-            if (btn) btn.textContent = "Sign In";
-            if (errorMsg) {
-                errorMsg.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4"></i> <span>${err.message}</span>`;
-                errorMsg.classList.remove('hidden');
-                lucide.createIcons();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCC ADMIN | E-Commerce</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class', 
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Public Sans', 'sans-serif'] },
+                    colors: { 
+                        primary: '#852221', 
+                        'primary-hover': '#6b1b1a',
+                        dark: {
+                            bg: '#13131a',      
+                            card: '#1c1c24',    
+                            border: '#2d2d3a',  
+                            text: '#9ca3af'     
+                        }
+                    }
+                }
             }
-        });
-};
+        }
+    </script>
 
-window.handleLogout = function() {
-    auth.signOut().then(() => window.location.reload());
-};
+    <style>
+    /* --- CORE BASE STYLES --- */
+    body { background-color: #F8F9FA; color: #64748b; font-family: 'Public Sans', sans-serif; transition: background-color 0.3s, color 0.3s; }
+    .nav-item { transition: all 0.2s ease-in-out; }
+    .custom-scroll::-webkit-scrollbar { width: 4px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .dark .custom-scroll::-webkit-scrollbar-thumb { background: #3f3f46; }
 
-// --- AUTH LISTENER ---
-auth.onAuthStateChanged(async (user) => {
-    const login = document.getElementById('login-screen');
-    const dash = document.getElementById('dashboard-container');
-    const sidebar = document.getElementById('sidebar');
+    /* --- ACTIVE STATE --- */
+    .nav-item.active { 
+        background-color: #852221 !important; 
+        color: white !important; 
+        box-shadow: 0 4px 12px rgba(133, 34, 33, 0.25); 
+    }
+    .dark .nav-item.active {
+        box-shadow: none !important; 
+        border: 1px solid rgba(0,0,0,0.2);
+    }
+    .nav-item.active i, .nav-item.active .menu-arrow { color: white !important; }
+    .nav-item.active:hover { background-color: #6b1b1a !important; color: white !important;}
 
-    if (user) {
-        if (ALLOWED_ADMINS.some(admin => admin.toLowerCase() === user.email.toLowerCase())) {
-            if (login) login.style.display = 'none';
-            if (dash) dash.classList.remove('hidden');
-            if (dash) dash.classList.add('flex');
-            if (sidebar) sidebar.classList.remove('hidden'); 
+    /* --- HOVER STATE --- */
+    .nav-item:hover:not(.active) { background-color: #f1f5f9; color: #852221; }
+    .dark .nav-item:hover:not(.active) { background-color: #2d2d3a !important; color: white !important; }
+
+    /* --- SUB-ITEMS --- */
+    .sub-item.active .sub-dot { background-color: #852221; box-shadow: 0 0 0 2px rgba(133, 34, 33, 0.2); transform: scale(1.2); }
+    .dark .sub-item.active .sub-dot { background-color: #ef4444; box-shadow: none; }
+    .sub-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #cbd5e1; margin-right: 12px; transition: all 0.2s; }
+
+    /* --- MODALS --- */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); z-index: 50; display: none; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal-content { background: white; width: 100%; max-width: 600px; border-radius: 12px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); animation: modalSlide 0.3s ease-out; }
+    .dark .modal-content { background-color: #1c1c24; border: 1px solid #2d2d3a; color: white; }
+    @keyframes modalSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* --- FORM INPUTS --- */
+    .form-input { width: 100%; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; outline: none; transition: border-color 0.2s; }
+    .form-input:focus { border-color: #852221; ring: 2px solid #852221; }
+    .dark .form-input { background-color: #13131a; border-color: #2d2d3a; color: white; }
+    .dark .form-input:focus { border-color: #ef4444; }
+
+    /* --- UTILS --- */
+    #login-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #F8F9FA; z-index: 100; display: flex; align-items: center; justify-content: center; }
+    .dark #login-screen { background-color: #13131a; }
+    .table-row-hover:hover { background-color: #f8fafc; }
+    .dark .table-row-hover:hover { background-color: #2d2d3a; }
+    .media-upload-area { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; background: #f8fafc; }
+    .media-upload-area:hover { border-color: #852221; background: #fff5f5; }
+    .dark .media-upload-area { background-color: #13131a; border-color: #2d2d3a; }
+    .dark .media-upload-area:hover { background-color: #2d2d3a; border-color: #ef4444; }
+</style>
+</head>
+<body class="h-screen flex overflow-hidden text-sm dark:bg-dark-bg dark:text-gray-300">
+
+    <div id="login-screen">
+        <div class="w-full max-w-sm bg-white dark:bg-dark-card rounded-2xl shadow-xl p-8 border border-gray-100 dark:border-dark-border">
+            <div class="text-center mb-8">
+                <img src="logo.png" class="mx-auto mb-4 object-contain h-24 w-auto" alt="SCC Logo">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white">Admin Portal</h2>
+                <p class="text-gray-400 text-xs mt-1">Please sign-in to your account</p>
+            </div>
+            <div id="loginError" class="hidden mb-4 p-3 bg-red-50 text-red-600 text-xs rounded border border-red-100 flex items-center gap-2"><i data-lucide="alert-circle" class="w-4 h-4"></i> <span>Invalid credentials.</span></div>
+            <form onsubmit="event.preventDefault(); handleLogin();" class="space-y-4">
+                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Email</label><input type="email" id="loginEmail" class="form-input" placeholder="admin@scc.edu.ph"></div>
+                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Password</label><input type="password" id="loginPassword" class="form-input" placeholder="••••••••"></div>
+                <button type="submit" id="loginBtn" class="w-full bg-primary hover:bg-red-900 text-white font-bold py-2.5 rounded-lg transition-colors shadow-lg shadow-red-200">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="addItemModal" class="modal-overlay"><div class="modal-content"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Add New Product</h3><button onclick="closeModal('addItemModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6"><div class="space-y-4"><input id="inp_name" class="form-input" placeholder="Product Name"><input id="inp_price" type="number" class="form-input" placeholder="Price (PHP)"><input id="inp_recipient" class="form-input" placeholder="Recipient / Supplier"><textarea id="inp_desc" class="form-input" rows="3" placeholder="Description"></textarea></div><div class="space-y-4"><select id="inp_status" class="form-input"><option>In Stock</option><option>Out of Stock</option><option>Low Stock</option></select><select id="inp_category" class="form-input"><option>School Supplies</option><option>Books & Learning Materials</option><option>School Uniform & Clothing</option><option>Art & Creativity</option><option>Sports & PE</option><option>Organization & Accessories</option></select><input id="inp_stock" type="number" class="form-input" placeholder="Stock Qty"><div class="media-upload-area" onclick="document.getElementById('inp_file').click()"><i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i><span class="text-xs text-gray-500">Click to Upload Image</span></div><input type="file" id="inp_file" class="hidden"></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('addItemModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border">Cancel</button><button onclick="saveNewProduct()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-red-900">Save Product</button></div></div></div>
+
+    <div id="addUserModal" class="modal-overlay"><div class="modal-content" style="max-width:500px"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Add New User</h3><button onclick="closeModal('addUserModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 space-y-4"><input id="u_name" class="form-input" placeholder="Full Name"><input id="u_email" type="email" class="form-input" placeholder="Email Address"><input id="u_pass" type="password" class="form-input" placeholder="Temporary Password"><input id="u_course" class="form-input" placeholder="Course / Department"><div class="grid grid-cols-2 gap-4"><select id="u_type" class="form-input"><option value="Customer">Customer</option><option value="Seller">Seller</option><option value="Staff">Staff</option></select><select id="u_role" class="form-input"><option value="User">User</option><option value="Manager">Manager</option><option value="Admin">Admin</option></select></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('addUserModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border">Cancel</button><button onclick="saveNewUser()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-red-900">Create User</button></div></div></div>
+
+    <div id="verifyUserModal" class="modal-overlay"><div class="modal-content" style="max-width:500px"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Verify Account</h3><button onclick="closeModal('verifyUserModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 space-y-4"><div class="bg-yellow-50 text-yellow-700 p-3 rounded text-xs">Verify this user's details before approving.</div><input type="hidden" id="v_uid"><input id="v_email" class="form-input bg-gray-100 text-gray-500" readonly><input id="v_name" class="form-input" placeholder="Confirm Full Name"><div class="grid grid-cols-2 gap-4"><select id="v_type" class="form-input"><option value="Customer">Customer</option><option value="Seller">Seller</option><option value="Staff">Staff</option></select><select id="v_role" class="form-input"><option value="User">User</option><option value="Manager">Manager</option><option value="Admin">Admin</option></select></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('verifyUserModal')" class="px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100">Cancel</button><button onclick="saveVerifiedUser()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Approve & Verify</button></div></div></div>
+    
+    <div id="myProfileModal" class="modal-overlay"><div class="modal-content" style="max-width:400px"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold dark:text-white">My Profile</h3><button onclick="closeModal('myProfileModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 flex flex-col items-center gap-4"><div class="relative"><img id="mp_img" src="" class="w-24 h-24 rounded-full bg-gray-200 object-cover border-4 border-white shadow-lg"><button onclick="document.getElementById('mp_file').click()" class="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full hover:bg-red-900"><i data-lucide="camera" class="w-4 h-4"></i></button></div><input type="file" id="mp_file" class="hidden"><input id="mp_name" class="form-input text-center font-bold text-lg" placeholder="Full Name"><input id="mp_email" class="form-input bg-gray-50 text-center text-gray-500 text-xs" readonly><div class="grid grid-cols-2 gap-4 w-full"><input id="mp_role" class="form-input bg-gray-50 text-xs text-center" readonly><input id="mp_uid" class="form-input bg-gray-50 text-xs text-center" readonly></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('myProfileModal')" class="px-4 py-2 border rounded-lg text-gray-600">Close</button><button onclick="saveMyProfile()" class="px-4 py-2 bg-primary text-white rounded-lg">Update Profile</button></div></div></div>
+
+    <div id="addFinanceModal" class="modal-overlay"><div class="modal-content" style="max-width: 450px;"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">New Transaction</h3><button onclick="closeModal('addFinanceModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 space-y-4"><div class="grid grid-cols-2 gap-4"><label class="cursor-pointer"><input type="radio" name="trans_type" value="Income" class="peer hidden" checked><div class="p-3 text-center border rounded-lg peer-checked:bg-green-50 peer-checked:border-green-500 peer-checked:text-green-700 hover:bg-gray-50 dark:border-dark-border dark:peer-checked:bg-green-900/20 dark:peer-checked:text-green-400 transition-all"><i data-lucide="arrow-down-circle" class="w-5 h-5 mx-auto mb-1"></i><span class="text-xs font-bold uppercase">Income</span></div></label><label class="cursor-pointer"><input type="radio" name="trans_type" value="Outcome" class="peer hidden"><div class="p-3 text-center border rounded-lg peer-checked:bg-red-50 peer-checked:border-red-500 peer-checked:text-red-700 hover:bg-gray-50 dark:border-dark-border dark:peer-checked:bg-red-900/20 dark:peer-checked:text-red-400 transition-all"><i data-lucide="arrow-up-circle" class="w-5 h-5 mx-auto mb-1"></i><span class="text-xs font-bold uppercase">Expense</span></div></label></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Amount (₱)</label><input type="number" id="fin_amount" class="form-input text-lg font-bold" placeholder="0.00"></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Description / Title</label><input type="text" id="fin_desc" class="form-input" placeholder="e.g. Sold 5 Laptops"></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Date</label><input type="date" id="fin_date" class="form-input text-sm text-gray-600 dark:text-gray-300"></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl border-t dark:border-dark-border"><button onclick="closeModal('addFinanceModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border transition-colors">Cancel</button><button onclick="saveFinancialRecord()" class="px-4 py-2 bg-[#852221] text-white rounded-lg hover:bg-[#6b1b1a] transition-colors shadow-lg shadow-red-200 dark:shadow-none font-medium">Save Record</button></div></div></div>
+
+    <aside id="sidebar" class="bg-white dark:bg-dark-card flex flex-col border-r border-gray-200 dark:border-dark-border z-20 flex-shrink-0 w-64 transition-colors">
+        <div id="sidebarToggle" class="h-16 flex items-center justify-between px-6 mb-2 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-dark-border transition-colors group">
+            <div class="flex items-center gap-3 w-full">
+                <img src="logo.png" class="w-8 h-8 object-contain" alt="SCC Logo">
+                <span class="brand-text text-lg font-bold text-gray-700 dark:text-white tracking-tight">SCC <span class="text-primary">E-COMMERCE</span></span>
+            </div>
+        </div>
+
+        <div class="px-6 mb-4 flex items-center gap-3 user-wrapper transition-all duration-300 min-h-[48px]">
+            <div class="relative flex-shrink-0">
+                <img id="sidebar-avatar" src="https://ui-avatars.com/api/?name=Admin&background=852221&color=fff" alt="Admin" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm">
+                <span class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+            </div>
+            <div class="user-info overflow-hidden">
+                <h4 class="text-sm font-semibold text-gray-700 dark:text-white truncate user-name">Admin User</h4>
+                <p class="text-xs text-gray-400 truncate user-role">Admin</p>
+            </div>
+        </div>
+
+        <nav class="flex-1 overflow-y-auto custom-scroll px-3 pb-4">
+            <div onclick="switchView('dashboard')" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer active mb-1" id="nav-dashboard">
+                <div class="flex items-center gap-3"><i data-lucide="home" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">Dashboard</span></div>
+                <i data-lucide="chevron-down" class="menu-arrow w-4 h-4 text-white flex-shrink-0"></i>
+            </div>
             
-            initDataListeners();
-            await fetchAndSyncUserProfile(user);
-        } else {
-            alert("Access Denied: You are not an authorized admin.");
-            auth.signOut();
-        }
-    } else {
-        if (login) login.style.display = 'flex';
-        if (dash) dash.classList.add('hidden');
-        if (dash) dash.classList.remove('flex');
-        if (sidebar) sidebar.classList.add('hidden');
-    }
-});
+            <div class="pl-3 mb-4 space-y-1">
+                <div id="sub-dashboard" onclick="switchView('dashboard')" class="sub-item flex items-center px-3 py-2 cursor-pointer group active"><div class="sub-dot flex-shrink-0"></div><span class="menu-label group-hover:text-primary transition-colors text-xs font-bold text-[#852221] dark:text-red-400">E-Commerce</span></div>
+            </div>
 
-// --- PROFILE SYNC ---
-async function fetchAndSyncUserProfile(user) {
-    const userRef = db.collection('admin').doc(user.uid);
-    try {
-        const doc = await userRef.get();
-        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+            <div class="px-3 mt-6 mb-2 min-h-[20px]">
+                <span class="menu-label text-xs uppercase text-gray-400 font-semibold tracking-wider block">Apps & Pages</span>
+            </div>
 
-        if (doc.exists) {
-            const data = doc.data();
-            updateProfileUI(data.name || "Admin", data.role || "Admin", user.email, data.photoURL);
-            await userRef.update({ lastLogin: timestamp });
-        } else {
-            const newProfile = { name: "Admin User", email: user.email, role: "Super Admin", createdAt: timestamp, lastLogin: timestamp };
-            await userRef.set(newProfile);
-            updateProfileUI(newProfile.name, newProfile.role, user.email);
-        }
-    } catch (error) { console.error("Profile Error", error); }
-}
+            <div class="space-y-1">
+                <a onclick="switchView('allItems')" id="nav-allItems" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="layers" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">All Items</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+                
+                <a onclick="switchView('inbox')" id="nav-inbox" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="message-square" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">Inbox</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+                
+                <a onclick="switchView('schoolListings')" id="nav-schoolListings" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="graduation-cap" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">School Listings</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+                
+                <a onclick="switchView('pendingApprovals')" id="nav-pendingApprovals" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="file-clock" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">Pending List Approval</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+                
+                <a onclick="switchView('users')" id="nav-users" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="users" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">User Management</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
 
-function updateProfileUI(name, role, email, photoURL) {
-    document.querySelectorAll('.user-name').forEach(el => el.innerText = name);
-    document.querySelectorAll('.user-role').forEach(el => el.innerText = role);
-    
-    const imgUrl = photoURL || `https://ui-avatars.com/api/?name=${name}&background=852221&color=fff`;
-    const avatarIds = ['mp_img', 'sidebar-avatar', 'header-avatar', 'dropdown-avatar'];
-    avatarIds.forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.src = imgUrl;
-    });
-}
+                <a onclick="switchView('financials')" id="nav-financials" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="bar-chart-3" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">Financial Reports</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+                
+                <a onclick="switchView('transactions')" id="nav-transactions" class="nav-item flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border hover:text-primary dark:hover:text-white transition-colors group">
+                    <div class="flex items-center gap-3"><i data-lucide="credit-card" class="w-5 h-5 flex-shrink-0"></i><span class="menu-label font-medium">Transaction History</span></div>
+                    <i data-lucide="chevron-right" class="menu-arrow w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                </a>
+            </div>
+        </nav>
+    </aside>
 
-// --- DATA LISTENERS ---
-function initDataListeners() {
-    db.collection('products').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalProducts = [];
-        snap.forEach(d => globalProducts.push({ id: d.id, ...d.data() }));
-        renderProducts();
-    });
-
-    db.collection('users').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalUsers = [];
-        snap.forEach(d => globalUsers.push({ id: d.id, ...d.data() }));
-        renderUsers();
-    });
-}
-
-// --- RENDER FUNCTIONS ---
-function getStatusBadge(status) {
-    const s = (status || '').toLowerCase();
-    const base = "px-2 py-1 rounded text-xs font-bold";
-    if (['in stock', 'active', 'verified'].includes(s)) return `${base} bg-green-100 text-green-600`;
-    if (['out of stock', 'rejected', 'suspended'].includes(s)) return `${base} bg-red-100 text-red-600`;
-    if (['low stock', 'pending'].includes(s)) return `${base} bg-orange-100 text-orange-600`;
-    return `${base} bg-gray-100 text-gray-500`;
-}
-
-function renderProducts() {
-    const tDashboard = document.querySelector('#productsTable tbody');
-    const tAllItems = document.querySelector('#allItemsTable tbody');
-
-    if (tDashboard) {
-        tDashboard.innerHTML = globalProducts.slice(0, 5).map(p => {
-            const name = p.Product || p.name || 'Unnamed';
-            const price = p.Price || p.price || 0;
-            const stock = p.Stock || p.stock || 0;
-            const status = p.Status || p.status || 'Unknown';
-            return `<tr class="border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"><td class="py-3 pl-2 font-medium text-gray-700 dark:text-gray-300">${name}</td><td class="py-3 text-gray-600 dark:text-gray-400">₱${price}</td><td class="py-3 text-gray-600 dark:text-gray-400">${stock}</td><td class="py-3 text-right pr-2"><span class="${getStatusBadge(status)}">${status}</span></td></tr>`;
-        }).join('');
-    }
-
-    if (tAllItems) {
-        tAllItems.innerHTML = globalProducts.map(p => {
-            const name = p.Product || p.name || 'Unnamed';
-            const img = p.Image || p.imageUrl || `https://ui-avatars.com/api/?name=${name}&background=eee`;
-            const cat = p.Category || p.category || '--';
-            const recipient = p.Recipient || p.recipient || '--';
-            const price = p.Price || p.price || 0;
-            const stock = p.Stock || p.stock || 0;
-            const status = p.Status || p.status || 'Unknown';
+    <main class="flex-1 flex flex-col min-w-0 transition-colors" id="dashboard-container">
+        
+        <header class="h-16 bg-white dark:bg-dark-card border-b dark:border-dark-border flex items-center justify-between px-6 sticky top-0 z-30 transition-colors">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden p-2 text-gray-500"><i data-lucide="menu" class="w-6 h-6"></i></button>
+                <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Dashboards <span class="mx-2">/</span> <span class="text-[#852221] dark:text-red-400">E-Commerce</span></div>
+                <div class="hidden md:flex items-center bg-gray-100 dark:bg-[#13131a] rounded-lg px-3 py-2 w-64 ml-4">
+                    <i data-lucide="search" class="w-4 h-4 text-gray-400"></i>
+                    <input type="text" id="globalSearch" placeholder="Search..." class="bg-transparent border-none outline-none text-sm ml-2 w-full text-gray-600 dark:text-gray-300">
+                </div>
+            </div>
             
-            return `
-            <tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors">
-                <td class="px-6 py-4 flex items-center gap-3">
-                    <img src="${img}" class="w-10 h-10 rounded-lg object-cover border border-gray-100 shadow-sm">
-                    <div><p class="font-bold text-gray-700 dark:text-gray-300 text-sm">${name}</p><p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6)}...</p></div>
-                </td>
-                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${cat}</td>
-                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${recipient}</td>
-                <td class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">₱${price}</td>
-                <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${stock}</td>
-                <td class="px-6 py-4 text-right"><span class="${getStatusBadge(status)}">${status}</span></td>
-                <td class="px-6 py-4 text-right">
-                    <button onclick="deleteItem('products', '${p.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                </td>
-            </tr>`;
-        }).join('');
-    }
-    lucide.createIcons();
-}
+            <div class="flex items-center gap-4">
+                <button onclick="toggleTheme()" class="p-2 text-gray-400 hover:text-[#852221] dark:hover:text-white transition-colors">
+                    <i id="theme-icon" data-lucide="moon" class="w-5 h-5"></i>
+                </button>
 
-function renderUsers() {
-    const tCus = document.getElementById('tbody-customers');
-    const tSel = document.getElementById('tbody-sellers');
-    const tUnv = document.getElementById('tbody-unverified');
+                <button class="p-2 text-gray-400 hover:text-[#852221] dark:hover:text-white transition-colors relative">
+                    <i data-lucide="bell" class="w-5 h-5"></i>
+                    <span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                </button>
+                
+                <div class="relative ml-2" id="userMenuContainer">
+                    <button onclick="toggleUserDropdown()" class="flex items-center gap-2 focus:outline-none">
+                        <div class="w-10 h-10 rounded-full bg-[#852221] text-white flex items-center justify-center font-bold text-sm border-2 border-white dark:border-dark-border shadow-sm hover:ring-2 ring-red-100 transition-all user-profile-icon overflow-hidden">
+                            <img id="header-avatar" src="https://ui-avatars.com/api/?name=Admin&background=852221&color=fff" class="w-full h-full object-cover">
+                        </div>
+                    </button>
+
+                    <div id="userDropdown" class="hidden absolute right-0 top-12 mt-2 w-64 bg-white dark:bg-dark-card rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-dark-border z-50 overflow-hidden transform transition-all duration-200 origin-top-right">
+                        <div class="px-5 py-4 border-b border-gray-50 dark:border-dark-border flex items-center gap-3 bg-gray-50/50 dark:bg-white/5">
+                            <img id="dropdown-avatar" src="https://ui-avatars.com/api/?name=Admin&background=852221&color=fff" class="w-10 h-10 rounded-full border border-gray-200 object-cover">
+                            <div>
+                                <h4 class="text-sm font-bold text-gray-800 dark:text-white user-name leading-tight">Admin User</h4>
+                                <p class="text-xs text-[#852221] dark:text-red-400 font-medium user-role mt-0.5">System Admin</p>
+                            </div>
+                        </div>
+                        <div class="p-2">
+                            <button onclick="openMyProfile()" class="w-full text-left px-4 py-2.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-border hover:text-gray-900 dark:hover:text-white rounded-lg flex items-center gap-3 transition-colors">
+                                <i data-lucide="user" class="w-4 h-4 text-gray-400"></i> Profile
+                            </button>
+                            <button onclick="handleLogout()" class="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center gap-3 transition-colors mt-1">
+                                <i data-lucide="log-out" class="w-4 h-4"></i> Logout
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-auto p-6 relative">
+            
+            <div id="view-dashboard" class="view-section active-view">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                    <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Total Revenue</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱1,245,000</h3></div>
+                            <button class="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg text-green-600 dark:text-green-400"><i data-lucide="banknote" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-green-500 h-3 rounded-t"></div><div class="w-1 bg-green-500 h-5 rounded-t"></div><div class="w-1 bg-green-500 h-8 rounded-t"></div><div class="w-1 bg-green-500 h-6 rounded-t"></div><div class="w-1 bg-green-500 h-9 rounded-t"></div></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Total Orders</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">7,890</h3></div>
+                            <button class="p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-[#852221] dark:text-red-400"><i data-lucide="shopping-cart" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-[#852221] h-3 rounded-t"></div><div class="w-1 bg-[#852221] h-5 rounded-t"></div><div class="w-1 bg-[#852221] h-8 rounded-t"></div><div class="w-1 bg-[#852221] h-4 rounded-t"></div></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Active Products</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">125</h3></div>
+                            <button class="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400"><i data-lucide="package" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-blue-500 h-2 rounded-t"></div><div class="w-1 bg-blue-500 h-6 rounded-t"></div><div class="w-1 bg-blue-500 h-3 rounded-t"></div></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Weekly Sales</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱12,695</h3></div>
+                            <button class="p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-orange-500 dark:text-orange-400"><i data-lucide="trending-up" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-orange-500 h-4 rounded-t"></div><div class="w-1 bg-orange-500 h-7 rounded-t"></div><div class="w-1 bg-orange-500 h-5 rounded-t"></div></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-100 dark:border-dark-border p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="font-bold text-gray-800 dark:text-white">Popular Products</h3>
+                            <button class="text-gray-400 hover:text-gray-600"><i data-lucide="more-horizontal" class="w-5 h-5"></i></button>
+                        </div>
+                        <table id="productsTable" class="w-full text-left">
+                            <thead><tr class="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-dark-border"><th class="pb-3 pl-2">Product</th><th class="pb-3">Price</th><th class="pb-3">Total Sales</th><th class="pb-3 text-right pr-2">Status</th></tr></thead>
+                            <tbody class="text-sm dark:text-gray-300"></tbody>
+                        </table>
+                    </div>
+                    <div class="lg:col-span-1 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-100 dark:border-dark-border p-6 flex flex-col items-center justify-center text-center">
+                        <div class="flex justify-between w-full mb-4"><h3 class="font-bold text-gray-800 dark:text-white">Goals</h3></div>
+                        <div class="relative w-32 h-32 flex items-center justify-center mb-4">
+                            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                <path class="text-gray-100 dark:text-[#2d2d3a]" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="2.5" />
+                                <path class="text-[#852221] dark:text-red-500" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="84, 100" />
+                            </svg>
+                            <span class="absolute text-2xl font-bold text-[#852221] dark:text-white">84%</span>
+                        </div>
+                        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">$8,100</h2>
+                        <p class="text-sm text-gray-400">Total Goal $10,000</p>
+                        <span class="mt-4 px-3 py-1 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="trending-up" class="w-3 h-3"></i> +10%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-financials" class="view-section hidden">
+                
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800 dark:text-white">Financial Reports</h2>
+                        <p class="text-sm text-gray-400">Overview of your income and expenses.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button class="px-4 py-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-border flex items-center gap-2 transition-colors">
+                            <i data-lucide="edit-3" class="w-4 h-4"></i> Edit Data
+                        </button>
+                        <button onclick="openModal('addFinanceModal')" class="px-4 py-2 bg-[#852221] text-white rounded-lg text-sm hover:bg-[#6b1b1a] flex items-center gap-2 shadow-lg shadow-red-200 dark:shadow-none transition-colors">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Input Data
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <div class="lg:col-span-2 space-y-6">
+                        
+                        <div class="bg-white dark:bg-dark-card p-6 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="font-bold text-lg text-gray-800 dark:text-white">Analytics Report</h3>
+                                <select class="form-input w-auto text-xs py-1 px-3">
+                                    <option>Monthly</option>
+                                    <option>Weekly</option>
+                                    <option>Yearly</option>
+                                </select>
+                            </div>
+                            
+                            <div class="h-64 w-full">
+                                <canvas id="financeChart"></canvas>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-dark-border">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="w-2 h-2 rounded-full bg-[#852221]"></span>
+                                        <span class="text-xs text-gray-400 uppercase font-bold">Income</span>
+                                    </div>
+                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
+                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
+                                </div>
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="w-2 h-2 rounded-full bg-gray-300"></span>
+                                        <span class="text-xs text-gray-400 uppercase font-bold">Outcome</span>
+                                    </div>
+                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
+                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
+                                </div>
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+                                        <span class="text-xs text-gray-400 uppercase font-bold">Net Profit</span>
+                                    </div>
+                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
+                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white dark:bg-dark-card p-6 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-lg text-gray-800 dark:text-white">Order History</h3>
+                                <button class="text-sm text-[#852221] dark:text-red-400 hover:underline">See All</button>
+                            </div>
+                            <table class="w-full text-left">
+                                <thead>
+                                    <tr class="text-xs text-gray-400 border-b dark:border-dark-border">
+                                        <th class="pb-3 font-medium">Customer</th>
+                                        <th class="pb-3 font-medium">Product</th>
+                                        <th class="pb-3 font-medium">Date</th>
+                                        <th class="pb-3 font-medium text-right">Amount</th>
+                                        <th class="pb-3 font-medium text-right">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm" id="finance-orders-table">
+                                    <tr>
+                                        <td colspan="5" class="py-8 text-center text-gray-400 italic">No transactions recorded yet.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        
+                        <div class="bg-white dark:bg-dark-card p-6 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 id="calendar-month" class="font-bold text-gray-800 dark:text-white">January 2026</h3>
+                                <div class="flex gap-2">
+                                    <button onclick="changeMonth(-1)" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded transition-colors"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                                    <button onclick="changeMonth(1)" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded transition-colors"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-7 text-center text-xs gap-y-4 text-gray-400 mb-2">
+                                <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                            </div>
+                            <div id="calendar-grid" class="grid grid-cols-7 text-center text-sm gap-y-4 font-medium dark:text-gray-300"></div>
+                        </div>
+
+                        <div class="bg-white dark:bg-dark-card p-6 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border">
+                            <h3 class="font-bold text-gray-800 dark:text-white mb-6">Activity History</h3>
+                            <div class="space-y-6 relative" id="activity-list">
+                                <div class="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-dark-border z-0"></div>
+                                <div class="flex gap-4 relative z-10 opacity-50">
+                                    <div class="w-8 h-8 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center flex-shrink-0 border-2 border-white dark:border-dark-card">
+                                        <i data-lucide="clock" class="w-4 h-4"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="text-sm font-bold text-gray-800 dark:text-white">No Activity</h4>
+                                        <p class="text-xs text-gray-400 mt-0.5">Recent financial activities will appear here.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-allItems" class="view-section hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-white">Product Inventory</h2>
+                    <div class="flex gap-3">
+                         <input type="text" id="productSearch" placeholder="Search products..." class="form-input w-64 border-gray-200">
+                        <button onclick="openModal('addItemModal')" class="bg-[#852221] hover:bg-[#6b1b1a] text-white px-4 py-2 rounded-lg flex gap-2 items-center shadow-lg shadow-red-200 transition-all">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Add Item
+                        </button>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-100 dark:border-dark-border overflow-hidden">
+                    <table id="allItemsTable" class="w-full text-left">
+                        <thead class="bg-gray-50 dark:bg-[#13131a] border-b dark:border-dark-border"><tr class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase"><th class="px-6 py-4">Product</th><th class="px-6 py-4">Category</th><th class="px-6 py-4">Recipient</th><th class="px-6 py-4">Price</th><th class="px-6 py-4">Stock</th><th class="px-6 py-4 text-right">Status</th><th class="px-6 py-4 text-right">Action</th></tr></thead>
+                        <tbody class="text-sm divide-y dark:divide-gray-800 dark:text-gray-300"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="view-users" class="view-section hidden">
+                 <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-white">User Management</h2>
+                    <div class="flex gap-3">
+                        <input type="text" id="userManagementSearch" placeholder="Search users..." class="form-input w-64 border-gray-200">
+                        <button onclick="openModal('addUserModal')" class="bg-[#852221] hover:bg-[#6b1b1a] text-white px-4 py-2 rounded-lg flex gap-2 items-center shadow-lg shadow-red-200 transition-all">
+                            <i data-lucide="user-plus" class="w-4 h-4"></i> Add User
+                        </button>
+                    </div>
+                </div>
+                <div class="flex gap-6 border-b dark:border-dark-border mb-6">
+                    <button onclick="switchUserTab('customers')" id="tab-customers" class="page-tab-active pb-3 text-sm font-medium border-b-2 border-[#852221] text-[#852221] dark:text-red-400">Customers</button>
+                    <button onclick="switchUserTab('sellers')" id="tab-sellers" class="page-tab-inactive pb-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white">Sellers / Staff</button>
+                    <button onclick="switchUserTab('unverified')" id="tab-unverified" class="page-tab-inactive pb-3 text-sm font-medium border-b-2 border-transparent text-red-500 hover:text-red-700 dark:hover:text-red-400">Unverified</button>
+                </div>
+                <div class="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-100 dark:border-dark-border overflow-hidden">
+                    <table id="usersTable" class="w-full text-left">
+                        <thead class="bg-gray-50 dark:bg-[#13131a] border-b dark:border-dark-border"><tr class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase"><th class="px-6 py-4">User</th><th class="px-6 py-4">Type</th><th class="px-6 py-4">Role</th><th class="px-6 py-4">Status</th><th class="px-6 py-4 text-right">Action</th></tr></thead>
+                        <tbody id="tbody-customers" class="text-sm divide-y dark:divide-gray-800 dark:text-gray-300"></tbody>
+                        <tbody id="tbody-sellers" class="text-sm divide-y dark:divide-gray-800 dark:text-gray-300 hidden"></tbody>
+                        <tbody id="tbody-unverified" class="text-sm divide-y dark:divide-gray-800 dark:text-gray-300 hidden"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div id="view-inbox" class="view-section hidden flex flex-col items-center justify-center h-full text-gray-400"><i data-lucide="message-square" class="w-16 h-16 mb-4 opacity-50"></i><h3 class="text-xl font-bold text-gray-600 dark:text-white">Inbox</h3><p>Module coming soon.</p></div>
+            <div id="view-schoolListings" class="view-section hidden flex flex-col items-center justify-center h-full text-gray-400"><i data-lucide="graduation-cap" class="w-16 h-16 mb-4 opacity-50"></i><h3 class="text-xl font-bold text-gray-600 dark:text-white">School Listings</h3><p>Module coming soon.</p></div>
+            <div id="view-pendingApprovals" class="view-section hidden flex flex-col items-center justify-center h-full text-gray-400"><i data-lucide="file-clock" class="w-16 h-16 mb-4 opacity-50"></i><h3 class="text-xl font-bold text-gray-600 dark:text-white">Pending Approvals</h3><p>Module coming soon.</p></div>
+            <div id="view-transactions" class="view-section hidden flex flex-col items-center justify-center h-full text-gray-400"><i data-lucide="credit-card" class="w-16 h-16 mb-4 opacity-50"></i><h3 class="text-xl font-bold text-gray-600 dark:text-white">Transactions</h3><p>Module coming soon.</p></div>
+
+        </div>
+    </main>
     
-    if(tCus) tCus.innerHTML = '';
-    if(tSel) tSel.innerHTML = '';
-    if(tUnv) tUnv.innerHTML = '';
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+    <script src="Script.js"></script>
 
-    globalUsers.forEach(u => {
-        const name = u.name || 'Unknown';
-        const role = u.role || 'User';
-        const type = u.userType || u.type || 'Customer'; 
-        const email = u.email || 'No Email';
-        const isVerified = u.verified === true || u.status === 'Active'; 
-        const img = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff`;
+</body>
 
-        const row = `
-        <tr class="border-b border-gray-50 dark:border-dark-border table-row-hover transition-colors">
-            <td class="px-6 py-4 flex items-center gap-3">
-                <img src="${img}" class="w-8 h-8 rounded-full shadow-sm">
-                <div><p class="font-bold text-sm text-gray-700 dark:text-gray-300">${name}</p><p class="text-xs text-gray-400">${email}</p></div>
-            </td>
-            <td class="px-6 py-4 text-gray-600 dark:text-gray-400">${type}</td>
-            <td class="px-6 py-4"><span class="badge-${role.toLowerCase()}">${role}</span></td>
-            <td class="px-6 py-4">${isVerified ? '<span class="badge-verified">Verified</span>' : '<span class="text-red-500 font-bold text-xs bg-red-50 px-2 py-1 rounded">Unverified</span>'}</td>
-            <td class="px-6 py-4 text-right">
-                ${!isVerified ? `<button onclick="openVerifyModal('${u.id}', '${email}')" class="text-blue-600 hover:text-blue-800 text-xs font-bold mr-3 hover:underline">Verify</button>` : ''}
-                <button onclick="deleteItem('users', '${u.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-            </td>
-        </tr>`;
-
-        if (!isVerified || u.status === 'Unverified') {
-            tUnv.innerHTML += row;
-        } else if (type === 'Seller' || type === 'Staff') {
-            tSel.innerHTML += row;
-        } else {
-            tCus.innerHTML += row;
-        }
-    });
-    
-    lucide.createIcons();
-}
-
-// --- UI & SEARCH ---
-function setupSearch() {
-    const pInput = document.getElementById('productSearch');
-    if (pInput) {
-        pInput.addEventListener('input', (e) => {
-            filterTable('allItemsTable', e.target.value.toLowerCase());
-        });
-    }
-
-    const uInput = document.getElementById('userManagementSearch');
-    if (uInput) {
-        uInput.addEventListener('input', (e) => {
-            if (!document.getElementById('tbody-customers').classList.contains('hidden')) filterTable('usersTable', e.target.value.toLowerCase());
-        });
-    }
-}
-
-function filterTable(tableId, term) {
-    const rows = document.querySelectorAll(`#${tableId} tbody tr`);
-    rows.forEach(row => {
-        row.style.display = row.innerText.toLowerCase().includes(term) ? '' : 'none';
-    });
-}
-
-// --- DROPDOWN LOGIC ---
-window.toggleUserDropdown = function() {
-    const dd = document.getElementById('userDropdown');
-    const container = document.getElementById('userMenuContainer');
-    
-    if (dd.classList.contains('hidden')) {
-        dd.classList.remove('hidden');
-        setTimeout(() => {
-            document.addEventListener('click', closeUserDropdownOutside);
-        }, 10);
-    } else {
-        dd.classList.add('hidden');
-        document.removeEventListener('click', closeUserDropdownOutside);
-    }
-};
-
-function closeUserDropdownOutside(e) {
-    const container = document.getElementById('userMenuContainer');
-    const dd = document.getElementById('userDropdown');
-    
-    if (container && !container.contains(e.target)) {
-        dd.classList.add('hidden');
-        document.removeEventListener('click', closeUserDropdownOutside);
-    }
-}
-
-// --- SAVE ACTIONS (Products via Cloudinary) ---
-window.saveNewProduct = async function() {
-    const name = document.getElementById('inp_name').value;
-    const price = document.getElementById('inp_price').value;
-    const stock = document.getElementById('inp_stock').value;
-    const file = document.getElementById('inp_file').files[0];
-
-    if (!name || !price) return alert("Please fill required fields");
-
-    const saveBtn = document.querySelector('#addItemModal button.bg-primary');
-    const orgText = saveBtn.textContent;
-    saveBtn.textContent = "Uploading...";
-    saveBtn.disabled = true;
-
-    try {
-        let imageUrl = "";
-
-        // 1. UPLOAD TO CLOUDINARY
-        if (file) {
-            imageUrl = await uploadToCloudinary(file);
-        } else {
-            imageUrl = `https://ui-avatars.com/api/?name=${name}&background=eee`;
-        }
-        
-        // 2. SAVE TO FIREBASE
-        await db.collection('products').add({
-            Product: name, 
-            Price: Number(price),
-            Stock: Number(stock),
-            Category: document.getElementById('inp_category').value,
-            Status: document.getElementById('inp_status').value,
-            Recipient: document.getElementById('inp_recipient').value,
-            Description: document.getElementById('inp_desc').value,
-            Image: imageUrl, 
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        closeAndClearModal('addItemModal');
-        alert("Product Saved!");
-    } catch (e) {
-        alert("Error: " + e.message);
-    } finally {
-        saveBtn.textContent = orgText;
-        saveBtn.disabled = false;
-    }
-};
-
-window.saveNewUser = async function() {
-    const email = document.getElementById('u_email').value;
-    const pass = document.getElementById('u_pass').value;
-    const name = document.getElementById('u_name').value;
-
-    if (!name || !email || !pass) return alert("Missing fields");
-
-    const saveBtn = document.querySelector('#addUserModal button.bg-primary');
-    saveBtn.textContent = "Creating...";
-    saveBtn.disabled = true;
-
-    let secondaryApp = null;
-    try {
-        secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
-        const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, pass);
-        
-        await db.collection('users').doc(cred.user.uid).set({
-            name,
-            email,
-            role: document.getElementById('u_role').value,
-            userType: document.getElementById('u_type').value,
-            course: document.getElementById('u_course').value,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            status: 'Active',
-            verified: true
-        });
-        
-        await secondaryApp.auth().signOut();
-        alert("User Created Successfully!");
-        closeAndClearModal('addUserModal');
-        
-    } catch (e) {
-        alert("Error creating user: " + e.message);
-    } finally {
-        if(secondaryApp) secondaryApp.delete(); 
-        saveBtn.textContent = "Create User";
-        saveBtn.disabled = false;
-    }
-};
-
-window.deleteItem = async function(collection, id) {
-    if(confirm("Are you sure you want to delete this record? This action cannot be undone.")) {
-        try {
-            await db.collection(collection).doc(id).delete();
-        } catch (error) {
-            alert("Error deleting: " + error.message);
-        }
-    }
-};
-
-// --- SAVE FINANCIAL RECORD (NEW) ---
-window.saveFinancialRecord = async function() {
-    const type = document.querySelector('input[name="trans_type"]:checked').value; 
-    const amount = parseFloat(document.getElementById('fin_amount').value);
-    const desc = document.getElementById('fin_desc').value;
-    const dateVal = document.getElementById('fin_date').value;
-
-    if (!amount || !desc) {
-        return alert("Please enter both an amount and a description.");
-    }
-
-    const btn = document.querySelector('#addFinanceModal button.bg-[#852221]');
-    const originalText = btn.textContent;
-    btn.textContent = "Saving...";
-    btn.disabled = true;
-
-    try {
-        let recordDate = dateVal ? new Date(dateVal) : new Date();
-        
-        await db.collection('financials').add({
-            type: type,          
-            amount: amount,      
-            description: desc,   
-            date: recordDate,    
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            createdBy: auth.currentUser ? auth.currentUser.email : 'System'
-        });
-
-        alert("Transaction Saved Successfully!");
-        closeAndClearModal('addFinanceModal');
-
-    } catch (error) {
-        console.error("Error saving finance record:", error);
-        alert("Error: " + error.message);
-    } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
-    }
-};
-
-// --- MODAL & TAB UTILS ---
-window.switchView = function(viewName) {
-    document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-    
-    const target = document.getElementById('view-' + viewName);
-    if(target) target.classList.remove('hidden');
-
-    document.querySelectorAll('.nav-item').forEach(el => {
-        el.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-border text-gray-600 dark:text-gray-400 cursor-pointer transition-colors group';
-        const icon = el.querySelector('i');
-        if(icon) {
-             icon.classList.remove('text-white');
-             icon.classList.remove('text-gray-400');
-        }
-    });
-
-    const activeNav = document.getElementById('nav-' + viewName);
-    if(activeNav) {
-        activeNav.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg active cursor-pointer transition-colors';
-        const icons = activeNav.querySelectorAll('i');
-        icons.forEach(i => i.classList.remove('group-hover:text-[#852221]'));
-    }
-    
-    document.getElementById('userDropdown').classList.add('hidden');
-    lucide.createIcons();
-};
-
-window.switchUserTab = function(type) {
-    currentTab = type;
-    document.querySelectorAll('[id^="tab-"]').forEach(b => {
-        b.className = 'page-tab-inactive pb-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer';
-        if(b.id === 'tab-unverified') b.classList.add('text-red-500');
-    });
-
-    const activeBtn = document.getElementById('tab-' + type);
-    if(activeBtn) {
-        activeBtn.className = (type === 'unverified') 
-            ? 'page-tab-active-danger pb-3 text-sm font-bold border-b-2 border-red-500 text-red-600 cursor-pointer' 
-            : 'page-tab-active pb-3 text-sm font-bold border-b-2 border-[#852221] text-[#852221] dark:text-red-400 cursor-pointer';
-    }
-
-    document.getElementById('tbody-customers').classList.add('hidden');
-    document.getElementById('tbody-sellers').classList.add('hidden');
-    document.getElementById('tbody-unverified').classList.add('hidden');
-    
-    const targetBody = document.getElementById('tbody-' + type);
-    if(targetBody) targetBody.classList.remove('hidden');
-};
-
-window.openModal = function(id) { 
-    document.getElementById(id)?.classList.add('open'); 
-    document.getElementById('userDropdown').classList.add('hidden'); 
-    
-    // Set default date for finance modal
-    if(id === 'addFinanceModal') {
-        const dateInput = document.getElementById('fin_date');
-        if(dateInput) dateInput.valueAsDate = new Date();
-    }
-};
-
-window.closeModal = function(id) { document.getElementById(id)?.classList.remove('open'); };
-window.closeAndClearModal = function(id) {
-    document.querySelectorAll(`#${id} input, #${id} textarea`).forEach(i => i.value = '');
-    closeModal(id);
-};
-
-window.openVerifyModal = function(uid, email) {
-    document.getElementById('v_uid').value = uid;
-    document.getElementById('v_email').value = email;
-    openModal('verifyUserModal');
-};
-
-window.saveVerifiedUser = async function() {
-    const uid = document.getElementById('v_uid').value;
-    const name = document.getElementById('v_name').value;
-    if(!name) return alert("Please confirm the user's name");
-
-    await db.collection('users').doc(uid).update({
-        name: name,
-        userType: document.getElementById('v_type').value,
-        role: document.getElementById('v_role').value,
-        verified: true,
-        status: 'Active'
-    });
-    closeModal('verifyUserModal');
-    alert("User Verified successfully.");
-};
-
-window.openMyProfile = function() {
-    const u = auth.currentUser;
-    if(u) {
-        document.getElementById('mp_email').value = u.email;
-        document.getElementById('mp_uid').value = u.uid;
-        document.getElementById('mp_name').value = document.querySelector('.user-name').innerText;
-        document.getElementById('mp_role').value = document.querySelector('.user-role').innerText;
-        document.getElementById('mp_img').src = document.getElementById('header-avatar').src;
-        openModal('myProfileModal');
-        document.getElementById('userDropdown').classList.add('hidden');
-    }
-};
-
-window.saveMyProfile = async function() {
-    const u = auth.currentUser;
-    const name = document.getElementById('mp_name').value;
-    const file = document.getElementById('mp_file').files[0];
-    const btn = document.querySelector('#myProfileModal button.bg-primary');
-    btn.textContent = "Updating..."; btn.disabled = true;
-    try {
-        let url = null;
-        if(file) {
-             url = await uploadToCloudinary(file);
-        }
-        await db.collection('admin').doc(u.uid).update({ name, ...(url && {photoURL: url}) });
-        updateProfileUI(name, document.getElementById('mp_role').value, u.email, url || document.getElementById('mp_img').src);
-        closeModal('myProfileModal');
-        alert("Profile Updated!");
-    } catch(e) { alert(e.message); } finally { btn.textContent = "Update"; btn.disabled = false; }
-};
-
-// --- DARK MODE LOGIC ---
-function toggleTheme() {
-    const html = document.documentElement;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    if (html.classList.contains('dark')) {
-        html.classList.remove('dark');
-        localStorage.setItem('theme', 'light');
-        if(themeIcon) themeIcon.setAttribute('data-lucide', 'moon'); 
-    } else {
-        html.classList.add('dark');
-        localStorage.setItem('theme', 'dark');
-        if(themeIcon) themeIcon.setAttribute('data-lucide', 'sun'); 
-    }
-    lucide.createIcons(); 
-}
-
-// Check saved theme on load
-if (localStorage.getItem('theme') === 'dark') {
-    document.documentElement.classList.add('dark');
-}
-
-// --- CALENDAR LOGIC (Interactive) ---
-let currentCalendarDate = new Date(); 
-let selectedFullDate = new Date(); 
-
-function renderCalendar() {
-    const monthYearEl = document.getElementById("calendar-month");
-    const gridEl = document.getElementById("calendar-grid");
-    
-    if (!monthYearEl || !gridEl) return;
-
-    const year = currentCalendarDate.getFullYear();
-    const month = currentCalendarDate.getMonth();
-
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    monthYearEl.innerText = `${monthNames[month]} ${year}`;
-
-    gridEl.innerHTML = "";
-
-    const firstDayIndex = new Date(year, month, 1).getDay();
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    
-    for (let i = 0; i < firstDayIndex; i++) {
-        const blank = document.createElement("span");
-        gridEl.appendChild(blank);
-    }
-
-    const today = new Date();
-
-    for (let i = 1; i <= lastDay; i++) {
-        const dayEl = document.createElement("span");
-        dayEl.innerText = i;
-        dayEl.className = "w-8 h-8 flex items-center justify-center rounded-full mx-auto cursor-pointer transition-all duration-200 text-sm";
-        
-        const isSelected = (i === selectedFullDate.getDate() && month === selectedFullDate.getMonth() && year === selectedFullDate.getFullYear());
-        const isToday = (i === today.getDate() && month === today.getMonth() && year === today.getFullYear());
-
-        if (isSelected) {
-            dayEl.classList.add("bg-[#852221]", "text-white", "shadow-md", "shadow-red-200", "dark:shadow-none", "font-bold");
-        } else if (isToday) {
-            dayEl.classList.add("text-[#852221]", "font-bold", "border", "border-red-100", "dark:border-red-900");
-        } else {
-            dayEl.classList.add("hover:bg-gray-100", "dark:hover:bg-gray-800", "text-gray-600", "dark:text-gray-300");
-        }
-
-        dayEl.onclick = () => selectDay(i);
-        gridEl.appendChild(dayEl);
-    }
-}
-
-function selectDay(day) {
-    selectedFullDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), day);
-    renderCalendar();
-    console.log(`User selected: ${selectedFullDate.toDateString()}`);
-}
-
-function changeMonth(direction) {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
-    renderCalendar();
-}
-
-// --- INITIALIZE (Final Loaded Sequence) ---
-document.addEventListener('DOMContentLoaded', () => {
-    lucide.createIcons();
-    setupSearch();
-    
-    // Media Upload
-    const mediaArea = document.querySelector('.media-upload-area');
-    if(mediaArea) mediaArea.addEventListener('click', () => document.getElementById('inp_file').click());
-    
-    // Profile Image Preview
-    const mpFile = document.getElementById('mp_file');
-    if(mpFile) {
-        mpFile.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if(file) {
-                const reader = new FileReader();
-                reader.onload = (e) => document.getElementById('mp_img').src = e.target.result;
-                reader.readAsDataURL(file);
-            }
-        });
-    }
-
-    // Init Calendar
-    if(typeof renderCalendar === "function") renderCalendar();
-
-    // Init Chart (Flat/Zero)
-    const ctx = document.getElementById('financeChart');
-    if(ctx) {
-        if (window.myFinanceChart) window.myFinanceChart.destroy();
-        window.myFinanceChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Week 01', 'Week 02', 'Week 03', 'Week 04'],
-                datasets: [
-                    { label: 'Income', data: [0, 0, 0, 0], backgroundColor: '#852221', borderRadius: 4, barPercentage: 0.6 },
-                    { label: 'Outcome', data: [0, 0, 0, 0], backgroundColor: '#e2e8f0', borderRadius: 4, barPercentage: 0.6 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'top', align: 'start', labels: { usePointStyle: true } } },
-                scales: { y: { beginAtZero: true, max: 10000, grid: { borderDash: [5, 5] } }, x: { grid: { display: false } } }
-            }
-        });
-    }
-});
+</html>
