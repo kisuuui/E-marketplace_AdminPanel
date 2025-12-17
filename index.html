@@ -102,7 +102,7 @@
         </div>
     </div>
 
-    <div id="addItemModal" class="modal-overlay"><div class="modal-content"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Add New Product</h3><button onclick="closeModal('addItemModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6"><div class="space-y-4"><input id="inp_name" class="form-input" placeholder="Product Name"><input id="inp_price" type="number" class="form-input" placeholder="Price (PHP)"><input id="inp_recipient" class="form-input" placeholder="Recipient / Supplier"><textarea id="inp_desc" class="form-input" rows="3" placeholder="Description"></textarea></div><div class="space-y-4"><select id="inp_status" class="form-input"><option>In Stock</option><option>Out of Stock</option><option>Low Stock</option></select><select id="inp_category" class="form-input"><option>School Supplies</option><option>Books & Learning Materials</option><option>School Uniform & Clothing</option><option>Art & Creativity</option><option>Sports & PE</option><option>Organization & Accessories</option></select><input id="inp_stock" type="number" class="form-input" placeholder="Stock Qty"><div class="media-upload-area" onclick="document.getElementById('inp_file').click()"><i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i><span class="text-xs text-gray-500">Click to Upload Image</span></div><input type="file" id="inp_file" class="hidden"></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('addItemModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border">Cancel</button><button onclick="saveNewProduct()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-red-900">Save Product</button></div></div></div>
+    <div id="addItemModal" class="modal-overlay"><div class="modal-content"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Add New Product</h3><button onclick="closeModal('addItemModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6"><div class="space-y-4"><input id="inp_name" class="form-input" placeholder="Product Name"><input id="inp_price" type="number" class="form-input" placeholder="Price (PHP)"><input id="inp_recipient" class="form-input" placeholder="Recipient / Supplier"><textarea id="inp_desc" class="form-input" rows="3" placeholder="Description"></textarea></div><div class="space-y-4"><select id="inp_status" class="form-input"><option>In Stock</option><option>Out of Stock</option><option>Low Stock</option></select><select id="inp_category" class="form-input"><option>Electronics</option><option>Fashion</option><option>Books</option><option>School Supplies</option></select><input id="inp_stock" type="number" class="form-input" placeholder="Stock Qty"><div class="media-upload-area" onclick="document.getElementById('inp_file').click()"><i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i><span class="text-xs text-gray-500">Click to Upload Image</span></div><input type="file" id="inp_file" class="hidden"></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('addItemModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border">Cancel</button><button onclick="saveNewProduct()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-red-900">Save Product</button></div></div></div>
 
     <div id="addUserModal" class="modal-overlay"><div class="modal-content" style="max-width:500px"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">Add New User</h3><button onclick="closeModal('addUserModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 space-y-4"><input id="u_name" class="form-input" placeholder="Full Name"><input id="u_email" type="email" class="form-input" placeholder="Email Address"><input id="u_pass" type="password" class="form-input" placeholder="Temporary Password"><input id="u_course" class="form-input" placeholder="Course / Department"><div class="grid grid-cols-2 gap-4"><select id="u_type" class="form-input"><option value="Customer">Customer</option><option value="Seller">Seller</option><option value="Staff">Staff</option></select><select id="u_role" class="form-input"><option value="User">User</option><option value="Manager">Manager</option><option value="Admin">Admin</option></select></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('addUserModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border">Cancel</button><button onclick="saveNewUser()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-red-900">Create User</button></div></div></div>
 
@@ -110,7 +110,48 @@
     
     <div id="myProfileModal" class="modal-overlay"><div class="modal-content" style="max-width:400px"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold dark:text-white">My Profile</h3><button onclick="closeModal('myProfileModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 flex flex-col items-center gap-4"><div class="relative"><img id="mp_img" src="" class="w-24 h-24 rounded-full bg-gray-200 object-cover border-4 border-white shadow-lg"><button onclick="document.getElementById('mp_file').click()" class="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full hover:bg-red-900"><i data-lucide="camera" class="w-4 h-4"></i></button></div><input type="file" id="mp_file" class="hidden"><input id="mp_name" class="form-input text-center font-bold text-lg" placeholder="Full Name"><input id="mp_email" class="form-input bg-gray-50 text-center text-gray-500 text-xs" readonly><div class="grid grid-cols-2 gap-4 w-full"><input id="mp_role" class="form-input bg-gray-50 text-xs text-center" readonly><input id="mp_uid" class="form-input bg-gray-50 text-xs text-center" readonly></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('myProfileModal')" class="px-4 py-2 border rounded-lg text-gray-600">Close</button><button onclick="saveMyProfile()" class="px-4 py-2 bg-primary text-white rounded-lg">Update Profile</button></div></div></div>
 
-    <div id="addFinanceModal" class="modal-overlay"><div class="modal-content" style="max-width: 450px;"><div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border"><h3 class="text-lg font-bold text-gray-800 dark:text-white">New Transaction</h3><button onclick="closeModal('addFinanceModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-6 space-y-4"><div class="grid grid-cols-2 gap-4"><label class="cursor-pointer"><input type="radio" name="trans_type" value="Income" class="peer hidden" checked><div class="p-3 text-center border rounded-lg peer-checked:bg-green-50 peer-checked:border-green-500 peer-checked:text-green-700 hover:bg-gray-50 dark:border-dark-border dark:peer-checked:bg-green-900/20 dark:peer-checked:text-green-400 transition-all"><i data-lucide="arrow-down-circle" class="w-5 h-5 mx-auto mb-1"></i><span class="text-xs font-bold uppercase">Income</span></div></label><label class="cursor-pointer"><input type="radio" name="trans_type" value="Outcome" class="peer hidden"><div class="p-3 text-center border rounded-lg peer-checked:bg-red-50 peer-checked:border-red-500 peer-checked:text-red-700 hover:bg-gray-50 dark:border-dark-border dark:peer-checked:bg-red-900/20 dark:peer-checked:text-red-400 transition-all"><i data-lucide="arrow-up-circle" class="w-5 h-5 mx-auto mb-1"></i><span class="text-xs font-bold uppercase">Expense</span></div></label></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Amount (₱)</label><input type="number" id="fin_amount" class="form-input text-lg font-bold" placeholder="0.00"></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Description / Title</label><input type="text" id="fin_desc" class="form-input" placeholder="e.g. Sold 5 Laptops"></div><div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Date</label><input type="date" id="fin_date" class="form-input text-sm text-gray-600 dark:text-gray-300"></div></div><div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl border-t dark:border-dark-border"><button onclick="closeModal('addFinanceModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border transition-colors">Cancel</button><button onclick="saveFinancialRecord()" class="px-4 py-2 bg-[#852221] text-white rounded-lg hover:bg-[#6b1b1a] transition-colors shadow-lg shadow-red-200 dark:shadow-none font-medium">Save Record</button></div></div></div>
+    <div id="addFinanceModal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="flex justify-between items-center px-6 py-4 border-b dark:border-dark-border">
+                <h3 class="text-lg font-bold text-gray-800 dark:text-white">New Transaction</h3>
+                <button onclick="closeModal('addFinanceModal')" class="p-1 hover:bg-gray-100 dark:hover:bg-dark-border rounded-full transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="fin_type" value="Income">
+
+                <div class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900/30 rounded-lg flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+                        <i data-lucide="arrow-down-circle" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-bold text-green-800 dark:text-green-400">Recording Income</h4>
+                        <p class="text-xs text-green-600 dark:text-green-500">Adding revenue to database</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Amount (₱)</label>
+                    <input type="number" id="fin_amount" class="form-input text-lg font-bold" placeholder="0.00">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Description / Title</label>
+                    <input type="text" id="fin_desc" class="form-input" placeholder="e.g. Sold 5 Laptops">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Date</label>
+                    <input type="date" id="fin_date" class="form-input text-sm text-gray-600 dark:text-gray-300">
+                </div>
+            </div>
+
+            <div class="px-6 py-4 bg-gray-50 dark:bg-[#13131a] flex justify-end gap-2 rounded-b-xl border-t dark:border-dark-border">
+                <button onclick="closeModal('addFinanceModal')" class="px-4 py-2 border dark:border-dark-border rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-border transition-colors">Cancel</button>
+                <button onclick="saveFinancialRecord()" class="px-4 py-2 bg-[#852221] text-white rounded-lg hover:bg-[#6b1b1a] transition-colors shadow-lg shadow-red-200 dark:shadow-none font-medium">Save Record</button>
+            </div>
+        </div>
+    </div>
 
     <aside id="sidebar" class="bg-white dark:bg-dark-card flex flex-col border-r border-gray-200 dark:border-dark-border z-20 flex-shrink-0 w-64 transition-colors">
         <div id="sidebarToggle" class="h-16 flex items-center justify-between px-6 mb-2 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-dark-border transition-colors group">
@@ -240,10 +281,10 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                     <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
                         <div class="flex justify-between items-start mb-4">
-                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Total Revenue</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱0</h3></div>
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Total Revenue</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱0.00</h3></div>
                             <button class="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg text-green-600 dark:text-green-400"><i data-lucide="banknote" class="w-5 h-5"></i></button>
                         </div>
-                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-green-500 h-3 rounded-t"></div><div class="w-1 bg-green-500 h-5 rounded-t"></div><div class="w-1 bg-green-500 h-8 rounded-t"></div><div class="w-1 bg-green-500 h-6 rounded-t"></div><div class="w-1 bg-green-500 h-9 rounded-t"></div></div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-green-500 h-1 rounded-t"></div><div class="w-1 bg-green-500 h-1 rounded-t"></div><div class="w-1 bg-green-500 h-1 rounded-t"></div><div class="w-1 bg-green-500 h-1 rounded-t"></div></div>
                     </div>
 
                     <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
@@ -251,7 +292,7 @@
                             <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Total Orders</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">0</h3></div>
                             <button class="p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-[#852221] dark:text-red-400"><i data-lucide="shopping-cart" class="w-5 h-5"></i></button>
                         </div>
-                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-[#852221] h-3 rounded-t"></div><div class="w-1 bg-[#852221] h-5 rounded-t"></div><div class="w-1 bg-[#852221] h-8 rounded-t"></div><div class="w-1 bg-[#852221] h-4 rounded-t"></div></div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-[#852221] h-1 rounded-t"></div><div class="w-1 bg-[#852221] h-1 rounded-t"></div><div class="w-1 bg-[#852221] h-1 rounded-t"></div></div>
                     </div>
 
                     <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
@@ -259,15 +300,15 @@
                             <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Active Products</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">0</h3></div>
                             <button class="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400"><i data-lucide="package" class="w-5 h-5"></i></button>
                         </div>
-                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-blue-500 h-2 rounded-t"></div><div class="w-1 bg-blue-500 h-6 rounded-t"></div><div class="w-1 bg-blue-500 h-3 rounded-t"></div></div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-blue-500 h-1 rounded-t"></div><div class="w-1 bg-blue-500 h-1 rounded-t"></div></div>
                     </div>
 
                     <div class="bg-white dark:bg-dark-card p-5 rounded-xl shadow-sm border border-slate-100 dark:border-dark-border hover:shadow-md transition-shadow relative overflow-hidden group">
                         <div class="flex justify-between items-start mb-4">
-                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Weekly Sales</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱0</h3></div>
+                            <div><p class="text-gray-500 dark:text-gray-400 text-sm font-medium">Weekly Sales</p><h3 class="text-2xl font-bold text-gray-800 dark:text-white mt-1">₱0.00</h3></div>
                             <button class="p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-orange-500 dark:text-orange-400"><i data-lucide="trending-up" class="w-5 h-5"></i></button>
                         </div>
-                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-orange-500 h-4 rounded-t"></div><div class="w-1 bg-orange-500 h-7 rounded-t"></div><div class="w-1 bg-orange-500 h-5 rounded-t"></div></div>
+                        <div class="flex items-end gap-1 h-8 opacity-50"><div class="w-1 bg-orange-500 h-1 rounded-t"></div><div class="w-1 bg-orange-500 h-1 rounded-t"></div></div>
                     </div>
                 </div>
 
@@ -291,7 +332,7 @@
                             </svg>
                             <span class="absolute text-2xl font-bold text-[#852221] dark:text-white">0%</span>
                         </div>
-                        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">₱0</h2>
+                        <h2 class="text-3xl font-bold text-gray-800 dark:text-white">₱0.00</h2>
                         <p class="text-sm text-gray-400">Total Goal ₱10,000</p>
                         <span class="mt-4 px-3 py-1 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="trending-up" class="w-3 h-3"></i> +0%</span>
                     </div>
@@ -333,30 +374,22 @@
                                 <canvas id="financeChart"></canvas>
                             </div>
 
-                            <div class="grid grid-cols-3 gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-dark-border">
-                                <div>
+                            <div class="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-gray-100 dark:border-dark-border">
+                                <div class="p-4 bg-red-50 dark:bg-red-900/10 rounded-xl border border-red-100 dark:border-red-900/20">
                                     <div class="flex items-center gap-2 mb-1">
                                         <span class="w-2 h-2 rounded-full bg-[#852221]"></span>
-                                        <span class="text-xs text-gray-400 uppercase font-bold">Income</span>
+                                        <span class="text-xs text-[#852221] dark:text-red-400 uppercase font-bold">Total Revenue</span>
                                     </div>
-                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
-                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
+                                    <h4 class="text-2xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
+                                    <span class="text-xs text-gray-400 font-medium">Gross Income</span>
                                 </div>
-                                <div>
+                                <div class="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700">
                                     <div class="flex items-center gap-2 mb-1">
-                                        <span class="w-2 h-2 rounded-full bg-gray-300"></span>
-                                        <span class="text-xs text-gray-400 uppercase font-bold">Outcome</span>
+                                        <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase font-bold">Total Transactions</span>
                                     </div>
-                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
-                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
-                                </div>
-                                <div>
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <span class="w-2 h-2 rounded-full bg-blue-400"></span>
-                                        <span class="text-xs text-gray-400 uppercase font-bold">Net Profit</span>
-                                    </div>
-                                    <h4 class="text-xl font-bold text-gray-800 dark:text-white">₱0.00</h4>
-                                    <span class="text-xs text-gray-400 font-medium flex items-center gap-1">--</span>
+                                    <h4 class="text-2xl font-bold text-gray-800 dark:text-white">0</h4>
+                                    <span class="text-xs text-gray-400 font-medium">Recorded Payments</span>
                                 </div>
                             </div>
                         </div>
@@ -481,4 +514,3 @@
 </body>
 
 </html>
-
