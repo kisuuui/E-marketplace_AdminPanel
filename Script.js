@@ -13,7 +13,6 @@ const ALLOWED_ADMINS = ["admin@scc.edu.ph", "justinvenedict.scc@gmail.com"];
 
 // --- INITIALIZATION ---
 let auth, db; 
-// Note: 'storage' is removed because we are now using Cloudinary
 
 try {
     if (!firebase.apps.length) {
@@ -29,7 +28,7 @@ try {
 let globalUsers = [], globalProducts = [];
 let currentTab = 'customers';
 
-// --- CLOUDINARY UPLOAD HELPER (NEW) ---
+// --- CLOUDINARY UPLOAD HELPER ---
 async function uploadToCloudinary(file) {
     const cloudName = "dokaqnqg6"; 
     const uploadPreset = "e-marketplace";
@@ -47,7 +46,7 @@ async function uploadToCloudinary(file) {
         if (!response.ok) throw new Error("Cloudinary Upload Failed");
 
         const data = await response.json();
-        return data.secure_url; // Returns the internet-ready link
+        return data.secure_url; 
         
     } catch (error) {
         console.error("Upload Error:", error);
@@ -319,14 +318,12 @@ window.saveNewProduct = async function() {
     try {
         let imageUrl = "";
 
-        // 1. UPLOAD TO CLOUDINARY
         if (file) {
             imageUrl = await uploadToCloudinary(file);
         } else {
             imageUrl = `https://ui-avatars.com/api/?name=${name}&background=eee`;
         }
         
-        // 2. SAVE TO FIREBASE
         await db.collection('products').add({
             Product: name, 
             Price: Number(price),
@@ -399,9 +396,9 @@ window.deleteItem = async function(collection, id) {
     }
 };
 
-// --- SAVE FINANCIAL RECORD (NEW) ---
+// --- SAVE FINANCIAL RECORD (INCOME ONLY) ---
 window.saveFinancialRecord = async function() {
-    const type = document.querySelector('input[name="trans_type"]:checked').value; 
+    // Note: Type selection removed, always "Income"
     const amount = parseFloat(document.getElementById('fin_amount').value);
     const desc = document.getElementById('fin_desc').value;
     const dateVal = document.getElementById('fin_date').value;
@@ -419,7 +416,7 @@ window.saveFinancialRecord = async function() {
         let recordDate = dateVal ? new Date(dateVal) : new Date();
         
         await db.collection('financials').add({
-            type: type,          
+            type: "Income",      // HARDCODED
             amount: amount,      
             description: desc,   
             date: recordDate,    
@@ -427,7 +424,7 @@ window.saveFinancialRecord = async function() {
             createdBy: auth.currentUser ? auth.currentUser.email : 'System'
         });
 
-        alert("Transaction Saved Successfully!");
+        alert("Income Recorded Successfully!");
         closeAndClearModal('addFinanceModal');
 
     } catch (error) {
@@ -504,17 +501,17 @@ window.closeAndClearModal = function(id) {
     // Clear all inputs
     document.querySelectorAll(`#${id} input, #${id} textarea`).forEach(i => i.value = '');
     
-    // Reset Select dropdowns to first option
+    // Reset Select dropdowns
     document.querySelectorAll(`#${id} select`).forEach(s => s.selectedIndex = 0);
 
-    // SPECIAL: Reset the Image Preview box if it exists
+    // Reset Image Preview box
     const mediaArea = document.querySelector(`#${id} .media-upload-area`);
     if(mediaArea) {
         mediaArea.innerHTML = `
             <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i>
             <span class="text-xs text-gray-500">Click to Upload Image</span>
         `;
-        lucide.createIcons(); // Refresh the icon
+        lucide.createIcons(); 
     }
 
     closeModal(id);
@@ -595,7 +592,7 @@ if (localStorage.getItem('theme') === 'dark') {
     document.documentElement.classList.add('dark');
 }
 
-// --- CALENDAR LOGIC (Interactive) ---
+// --- CALENDAR LOGIC ---
 let currentCalendarDate = new Date(); 
 let selectedFullDate = new Date(); 
 
@@ -660,10 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     setupSearch();
     
-    // 1. PRODUCT IMAGE PREVIEW
-    // We do NOT need a click listener here because your HTML 
-    // already has onclick="document.getElementById('inp_file').click()"
-    
+    // 1. Media Upload Click Trigger (HTML onclick handles click, we just handle preview)
     const inpFile = document.getElementById('inp_file');
     const mediaArea = document.querySelector('.media-upload-area');
 
@@ -698,7 +692,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3. Init Calendar
     if(typeof renderCalendar === "function") renderCalendar();
 
-    // 4. Init Chart (Flat/Zero)
+    // 4. Init Chart (INCOME ONLY)
     const ctx = document.getElementById('financeChart');
     if(ctx) {
         if (window.myFinanceChart) window.myFinanceChart.destroy();
@@ -707,14 +701,19 @@ document.addEventListener('DOMContentLoaded', () => {
             data: {
                 labels: ['Week 01', 'Week 02', 'Week 03', 'Week 04'],
                 datasets: [
-                    { label: 'Income', data: [0, 0, 0, 0], backgroundColor: '#852221', borderRadius: 4, barPercentage: 0.6 },
-                    { label: 'Outcome', data: [0, 0, 0, 0], backgroundColor: '#e2e8f0', borderRadius: 4, barPercentage: 0.6 }
+                    { 
+                        label: 'Income', 
+                        data: [0, 0, 0, 0], 
+                        backgroundColor: '#852221', 
+                        borderRadius: 4, 
+                        barPercentage: 0.5 
+                    }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { position: 'top', align: 'start', labels: { usePointStyle: true } } },
+                plugins: { legend: { display: false } },
                 scales: { y: { beginAtZero: true, max: 10000, grid: { borderDash: [5, 5] } }, x: { grid: { display: false } } }
             }
         });
