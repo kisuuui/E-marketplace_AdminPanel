@@ -1233,4 +1233,3 @@ function updateDashboardStats() {
         }
     });
 }
-
