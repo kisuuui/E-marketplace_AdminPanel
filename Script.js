@@ -9,7 +9,7 @@ const firebaseConfig = {
     measurementId: "G-0L7G265Q5F"
 };
 
-const ALLOWED_ADMINS = ["admin@scc.edu.ph", "justinvenedict.scc@gmail.com"];
+const ALLOWED_ADMINS = ["admin@scc.com", "justinvenedict.scc@gmail.com"];
 
 // --- INITIALIZATION ---
 let auth, db; 
@@ -1233,3 +1233,4 @@ function updateDashboardStats() {
         }
     });
 }
+
