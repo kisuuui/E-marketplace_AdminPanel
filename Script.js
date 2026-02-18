@@ -54,6 +54,72 @@ async function uploadToCloudinary(file) {
     }
 }
 
+// --- SYSTEM LOGGING ENGINE ---
+async function logAction(actionTitle, actionDetails) {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    try {
+        const adminName = document.querySelector('.user-name').innerText || "Unknown Admin";
+
+        await db.collection('logs').add({
+            adminId: user.uid,
+            adminName: adminName,
+            adminEmail: user.email,
+            action: actionTitle,
+            details: actionDetails,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log("Action Logged:", actionTitle);
+    } catch (e) {
+        console.error("Logging failed:", e);
+    }
+}
+
+const PROFIT_PERCENTAGE = 0.12; // 12% Admin Commission
+
+function renderLogs() {
+    const tbody = document.getElementById('tbody-logs');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-gray-400 italic">Loading...</td></tr>';
+
+    db.collection('logs')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .get()
+      .then(snap => {
+          if (snap.empty) {
+              tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-gray-400 italic">No logs found.</td></tr>';
+              return;
+          }
+
+          let html = '';
+          snap.forEach(doc => {
+              const d = doc.data();
+              const date = d.timestamp ? d.timestamp.toDate().toLocaleString() : 'Just now';
+              
+              html += `
+              <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors">
+                  <td class="px-6 py-4 text-gray-500 text-xs font-mono">${date}</td>
+                  <td class="px-6 py-4 font-medium text-gray-700 dark:text-white">
+                      <div class="flex items-center gap-2">
+                          <div class="w-6 h-6 rounded-full bg-[#852221] text-white flex items-center justify-center text-xs font-bold">${d.adminName[0]}</div>
+                          ${d.adminName}
+                      </div>
+                  </td>
+                  <td class="px-6 py-4 text-blue-600 dark:text-blue-400 font-medium">${d.action}</td>
+                  <td class="px-6 py-4 text-gray-500 dark:text-gray-400 font-mono text-xs">${d.details}</td>
+              </tr>`;
+          });
+          tbody.innerHTML = html;
+      })
+      .catch(e => {
+          console.error(e);
+          tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500">Access Denied: You are not a Super Admin.</td></tr>`;
+      });
+}
+
 // --- AUTHENTICATION ---
 window.handleLogin = function() {
     const e = document.getElementById('loginEmail').value.trim();
@@ -117,13 +183,83 @@ async function fetchAndSyncUserProfile(user) {
         if (doc.exists) {
             const data = doc.data();
             updateProfileUI(data.name || "Admin", data.role || "Admin", user.email, data.photoURL);
+            
+            // ROLE CHECK: If Super Admin, show Logs button
+            if (data.role === 'Super Admin') {
+                const logBtn = document.getElementById('nav-logs');
+                if (logBtn) logBtn.classList.remove('hidden');
+            }
+
             await userRef.update({ lastLogin: timestamp });
         } else {
-            const newProfile = { name: "Admin User", email: user.email, role: "Super Admin", createdAt: timestamp, lastLogin: timestamp };
+            const newProfile = { 
+                name: "Admin User", 
+                email: user.email, 
+                role: "Admin", // Default is NOT Super Admin
+                createdAt: timestamp, 
+                lastLogin: timestamp 
+            };
             await userRef.set(newProfile);
             updateProfileUI(newProfile.name, newProfile.role, user.email);
         }
     } catch (error) { console.error("Profile Error", error); }
+}
+
+
+// --- RENDER DASHBOARD ORDER HISTORY WIDGET ---
+function renderOrderHistoryWidget() {
+    const tbody = document.getElementById('finance-orders-table');
+    if (!tbody) return; // Stop if we aren't on the dashboard
+
+    // Use your existing 'financials' collection
+    db.collection('financials')
+      .orderBy('date', 'desc')
+      .limit(5) // Limit to 5 for the dashboard widget
+      .onSnapshot(snap => { // Use onSnapshot for real-time updates
+          if (snap.empty) {
+              tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-gray-400 italic">No recent orders.</td></tr>';
+              return;
+          }
+
+          let html = '';
+          snap.forEach(doc => {
+              const data = doc.data();
+              
+              // Map your existing Firestore fields to the Table columns
+              const customer = data.buyerName || "Walk-in Customer";
+              const product = data.itemName || "Unknown Item";
+              
+              // Format Date
+              const dateObj = data.date ? data.date.toDate() : new Date();
+              const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              
+              const amount = data.amount || 0;
+              
+              // Logic for Status: Your financials don't have a 'status' field yet, 
+              // so we default to "Completed" for income, or check if you add one later.
+              const status = data.status || 'Completed'; 
+              
+              let statusColor = 'bg-green-100 text-green-600';
+              if(status === 'Pending') statusColor = 'bg-yellow-100 text-yellow-600';
+              if(status === 'Cancelled') statusColor = 'bg-red-100 text-red-600';
+
+              html += `
+                <tr class="border-b border-gray-100 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                    <td class="py-4 font-medium text-gray-800 dark:text-gray-200">${customer}</td>
+                    <td class="py-4 text-gray-600 dark:text-gray-400">${product}</td>
+                    <td class="py-4 text-gray-600 dark:text-gray-400">${dateStr}</td>
+                    <td class="py-4 text-right font-medium text-gray-800 dark:text-gray-200">₱${amount.toLocaleString()}</td>
+                    <td class="py-4 text-right">
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full ${statusColor}">
+                            ${status}
+                        </span>
+                    </td>
+                </tr>
+              `;
+          });
+          
+          tbody.innerHTML = html;
+      });
 }
 
 function updateProfileUI(name, role, email, photoURL) {
@@ -138,21 +274,92 @@ function updateProfileUI(name, role, email, photoURL) {
     });
 }
 
-// --- DATA LISTENERS ---
+// --- UPDATED DATA LISTENERS ---
 function initDataListeners() {
+    // 1. Listen for Product Changes
     db.collection('products').orderBy('createdAt', 'desc').onSnapshot(snap => {
         globalProducts = [];
         snap.forEach(d => globalProducts.push({ id: d.id, ...d.data() }));
         renderProducts();
+        updateDashboardStats(); 
     });
 
+    // 2. Listen for User Changes
     db.collection('users').orderBy('createdAt', 'desc').onSnapshot(snap => {
         globalUsers = [];
         snap.forEach(d => globalUsers.push({ id: d.id, ...d.data() }));
         renderUsers();
+        updateDashboardStats(); 
     });
+
+    // 3. Listen for Financial Changes (Fixed to trigger UI updates)
+    db.collection('financials').onSnapshot(() => {
+        updateDashboardStats(); // This handles both cards and the graph
+    });
+    
+    renderOrderHistoryWidget();
 }
 
+// --- UPDATED DASHBOARD ANALYTICS (12% Profit & Graph Fix) ---
+function updateDashboardStats() {
+    // 1. Products & Users count
+    const activeProducts = globalProducts.filter(p => (p.Status || '').toLowerCase() === 'in stock').length;
+    const totalUsers = globalUsers.length;
+
+    if(document.getElementById('dash-active-products')) 
+        document.getElementById('dash-active-products').innerText = activeProducts;
+    if(document.getElementById('dash-total-users')) 
+        document.getElementById('dash-total-users').innerText = totalUsers;
+
+    // 2. Calculate Revenue (12% Profit Margin)
+    db.collection('financials').get().then(snap => {
+        let netProfit = 0;
+        let transactionCount = 0;
+        let weeklyBuckets = [0, 0, 0, 0]; 
+        const today = new Date();
+
+        snap.forEach(doc => {
+            const d = doc.data();
+            if(d.type === 'Income') {
+                // Safety: Ensure amount is a number
+                const amount = parseFloat(d.amount) || 0;
+                const adminProfit = amount * PROFIT_PERCENTAGE; 
+                
+                netProfit += adminProfit; 
+                transactionCount++;
+
+                // 3. Week Mapping for Graph
+                if (d.date) {
+                    const date = d.date.toDate(); 
+                    const diffDays = Math.ceil(Math.abs(today - date) / (1000 * 60 * 60 * 24));
+                    let weekIndex = 3 - Math.floor(diffDays / 7);
+                    
+                    if (weekIndex >= 0 && weekIndex <= 3) {
+                        weeklyBuckets[weekIndex] += adminProfit;
+                    }
+                }
+            }
+        });
+
+        // 4. Update UI Cards
+        const rDisplay = document.getElementById('dash-total-revenue');
+        const tDisplay = document.getElementById('dash-total-orders') || document.getElementById('dash-total-transactions');
+        
+        if(rDisplay) rDisplay.innerText = "₱" + netProfit.toLocaleString(undefined, {minimumFractionDigits: 2});
+        if(tDisplay) tDisplay.innerText = transactionCount;
+
+        // 5. Update Graph and Auto-Scale
+        if (window.myFinanceChart) {
+            window.myFinanceChart.data.datasets[0].data = weeklyBuckets;
+            
+            // Auto-scale fix: Adjust Y-axis if profit is small
+            const maxProfit = Math.max(...weeklyBuckets);
+            window.myFinanceChart.options.scales.y.max = maxProfit > 0 ? maxProfit * 1.5 : 1000;
+            
+            window.myFinanceChart.update();
+        }
+    }).catch(err => console.error("Dashboard Sync Error:", err));
+}
 // --- RENDER FUNCTIONS ---
 function getStatusBadge(status) {
     const s = (status || '').toLowerCase();
@@ -324,7 +531,7 @@ window.saveNewProduct = async function() {
             imageUrl = `https://ui-avatars.com/api/?name=${name}&background=eee`;
         }
         
-        await db.collection('products').add({
+        const docRef = await db.collection('products').add({
             Product: name, 
             Price: Number(price),
             Stock: Number(stock),
@@ -335,6 +542,9 @@ window.saveNewProduct = async function() {
             Image: imageUrl, 
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+
+        // LOGGING
+        await logAction("Created Product", `Item: ${name} (ID: ${docRef.id})`);
         
         closeAndClearModal('addItemModal');
         alert("Product Saved!");
@@ -372,6 +582,9 @@ window.saveNewUser = async function() {
             status: 'Active',
             verified: true
         });
+
+        // LOGGING
+        await logAction("Created User", `Name: ${name} (${email})`);
         
         await secondaryApp.auth().signOut();
         alert("User Created Successfully!");
@@ -390,59 +603,91 @@ window.deleteItem = async function(collection, id) {
     if(confirm("Are you sure you want to delete this record? This action cannot be undone.")) {
         try {
             await db.collection(collection).doc(id).delete();
+            // LOGGING
+            await logAction("Deleted Item", `Collection: ${collection}, ID: ${id}`);
         } catch (error) {
             alert("Error deleting: " + error.message);
         }
     }
 };
 
-// --- SAVE FINANCIAL RECORD (INCOME ONLY) ---
+// --- SAVE FINANCIAL RECORD (Updated for Full Details) ---
 window.saveFinancialRecord = async function() {
-    // Note: Type selection removed, always "Income"
-    const amount = parseFloat(document.getElementById('fin_amount').value);
-    const desc = document.getElementById('fin_desc').value;
+    // 1. Get Values from New Inputs
     const dateVal = document.getElementById('fin_date').value;
+    const refIdVal = document.getElementById('fin_refId').value.trim();
+    const buyerVal = document.getElementById('fin_buyer').value.trim();
+    const recipientVal = document.getElementById('fin_recipient').value.trim();
+    const itemVal = document.getElementById('fin_item').value.trim();
+    const categoryVal = document.getElementById('fin_category').value;
+    const amountVal = document.getElementById('fin_amount').value;
+    const descVal = document.getElementById('fin_desc').value.trim();
 
-    if (!amount || !desc) {
-        return alert("Please enter both an amount and a description.");
+    // 2. Validate Required Fields
+    if (!amountVal || !buyerVal || !itemVal) {
+        return alert("Please fill in Amount, Buyer Name, and Item Name.");
     }
+    const amount = parseFloat(amountVal);
 
-    const btn = document.querySelector('#addFinanceModal button.bg-[#852221]');
-    const originalText = btn.textContent;
-    btn.textContent = "Saving...";
-    btn.disabled = true;
+    // 3. Button Loading State
+    const btn = document.querySelector('#addFinanceModal button[onclick="saveFinancialRecord()"]');
+    let originalText = "Save Record";
+    if (btn) {
+        originalText = btn.textContent;
+        btn.textContent = "Saving...";
+        btn.disabled = true;
+    }
 
     try {
         let recordDate = dateVal ? new Date(dateVal) : new Date();
         
+        // 4. Save to Firestore (Full Object)
         await db.collection('financials').add({
-            type: "Income",      // HARDCODED
-            amount: amount,      
-            description: desc,   
-            date: recordDate,    
+            type: "Income",
+            date: recordDate,
+            refId: refIdVal || "AUTO-" + Date.now().toString().slice(-6), // Fallback if empty
+            buyerName: buyerVal,
+            recipient: recipientVal || "General Fund",
+            itemName: itemVal,
+            category: categoryVal,
+            amount: amount,
+            description: descVal,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             createdBy: auth.currentUser ? auth.currentUser.email : 'System'
         });
 
-        alert("Income Recorded Successfully!");
+        // 5. Log it
+        await logAction("Recorded Income", `Sold: ${itemVal} to ${buyerVal} for ₱${amount}`);
+
+        alert("Transaction Saved Successfully!");
         closeAndClearModal('addFinanceModal');
+        
+        // Refresh Table
+        if(typeof renderTransactions === 'function') renderTransactions();
 
     } catch (error) {
-        console.error("Error saving finance record:", error);
+        console.error("Error saving record:", error);
         alert("Error: " + error.message);
     } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
+        if (btn) {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
     }
 };
 
 // --- MODAL & TAB UTILS ---
+
 window.switchView = function(viewName) {
     document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
     
     const target = document.getElementById('view-' + viewName);
     if(target) target.classList.remove('hidden');
 
+    if(viewName === 'transactions') renderTransactions();
+    if(viewName === 'logs') renderLogs();
+
+    // Update Navigation Highlights
     document.querySelectorAll('.nav-item').forEach(el => {
         el.className = 'nav-item flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-border text-gray-600 dark:text-gray-400 cursor-pointer transition-colors group';
         const icon = el.querySelector('i');
@@ -485,18 +730,80 @@ window.switchUserTab = function(type) {
     if(targetBody) targetBody.classList.remove('hidden');
 };
 
-window.openModal = function(id) { 
-    document.getElementById(id)?.classList.add('open'); 
-    document.getElementById('userDropdown').classList.add('hidden'); 
+// --- UNIVERSAL MODAL UTILS (The Fix) ---
+
+window.openModal = function(id) {
+    const modal = document.getElementById(id);
+    const dropdown = document.getElementById('userDropdown');
     
-    // Set default date for finance modal
-    if(id === 'addFinanceModal') {
-        const dateInput = document.getElementById('fin_date');
-        if(dateInput) dateInput.valueAsDate = new Date();
+    if (dropdown) dropdown.classList.add('hidden');
+    if (!modal) return;
+
+    // CHECK: Is this the New Finance Modal? (Tailwind based)
+    if (modal.classList.contains('opacity-0') || modal.classList.contains('hidden')) {
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            const inner = modal.querySelector('div');
+            if(inner) {
+                inner.classList.remove('scale-95');
+                inner.classList.add('scale-100');
+            }
+        }, 10);
+
+        // Auto-set Date for Finance
+        if(id === 'addFinanceModal') {
+            const dateInput = document.getElementById('fin_date');
+            if(dateInput && !dateInput.value) dateInput.valueAsDate = new Date();
+        }
+    } else {
+        // OLD MODAL LOGIC (CSS Class based)
+        modal.classList.add('open');
     }
 };
 
-window.closeModal = function(id) { document.getElementById(id)?.classList.remove('open'); };
+window.closeModal = function(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+
+    // CHECK: How is this modal currently open?
+    if (modal.classList.contains('open')) {
+        // OLD MODAL: Just remove the class
+        modal.classList.remove('open');
+    } else {
+        // NEW MODAL: Use animation
+        modal.classList.add('opacity-0');
+        const inner = modal.querySelector('div');
+        if(inner) {
+            inner.classList.remove('scale-100');
+            inner.classList.add('scale-95');
+        }
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 300);
+    }
+};
+
+window.closeAndClearModal = function(id) {
+    // Clear inputs
+    document.querySelectorAll(`#${id} input, #${id} textarea`).forEach(i => i.value = '');
+    document.querySelectorAll(`#${id} select`).forEach(s => s.selectedIndex = 0);
+
+    // Reset Image Preview
+    const mediaArea = document.querySelector(`#${id} .media-upload-area`);
+    if(mediaArea) {
+        mediaArea.innerHTML = `
+            <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i>
+            <span class="text-xs text-gray-500">Click to Upload Image</span>
+        `;
+        lucide.createIcons(); 
+    }
+    
+    // Call the UNIVERSAL close function
+    closeModal(id);
+};
+
+
 window.closeAndClearModal = function(id) {
     // Clear all inputs
     document.querySelectorAll(`#${id} input, #${id} textarea`).forEach(i => i.value = '');
@@ -535,6 +842,10 @@ window.saveVerifiedUser = async function() {
         verified: true,
         status: 'Active'
     });
+
+    // LOGGING
+    await logAction("Verified User", `User: ${name} (ID: ${uid})`);
+
     closeModal('verifyUserModal');
     alert("User Verified successfully.");
 };
@@ -564,6 +875,10 @@ window.saveMyProfile = async function() {
              url = await uploadToCloudinary(file);
         }
         await db.collection('admin').doc(u.uid).update({ name, ...(url && {photoURL: url}) });
+        
+        // LOGGING
+        await logAction("Updated Profile", `Admin: ${name}`);
+
         updateProfileUI(name, document.getElementById('mp_role').value, u.email, url || document.getElementById('mp_img').src);
         closeModal('myProfileModal');
         alert("Profile Updated!");
@@ -657,7 +972,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     setupSearch();
     
-    // 1. Media Upload Click Trigger (HTML onclick handles click, we just handle preview)
+    // 1. Media Upload Click Trigger
     const inpFile = document.getElementById('inp_file');
     const mediaArea = document.querySelector('.media-upload-area');
 
@@ -668,7 +983,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const previewUrl = e.target.result;
-                    // Replace the dashed box content with the image
                     mediaArea.innerHTML = `<img src="${previewUrl}" class="w-full h-32 object-contain rounded-lg">`;
                 };
                 reader.readAsDataURL(file);
@@ -718,4 +1032,204 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-});
+}); // <--- CLOSED HERE (This was the missing piece!)
+
+// --- TRANSACTION HISTORY ENGINE (Updated for Mobile Data) ---
+function renderTransactions() {
+    const tbody = document.getElementById('tbody-transactions');
+    const totalDisplay = document.getElementById('total-income-display');
+    
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-400 italic">Syncing with mobile records...</td></tr>';
+
+    db.collection('financials')
+      .orderBy('date', 'desc')
+      .limit(50)
+      .get()
+      .then(snap => {
+          if (snap.empty) {
+              tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-400 italic">No transactions found.</td></tr>';
+              if(totalDisplay) totalDisplay.innerText = "₱0.00";
+              return;
+          }
+
+          let html = '';
+          let totalIncome = 0;
+
+          snap.forEach(doc => {
+              const d = doc.data();
+              const amount = d.amount || 0;
+              totalIncome += amount;
+
+              // 1. DATE
+              const date = d.date ? new Date(d.date.seconds * 1000).toLocaleDateString() : 'N/A';
+              
+              // 2. BUYER (Fallback to 'Walk-in' or 'System' if missing)
+              const buyer = d.buyerName || d.buyer || 'System/Walk-in';
+
+              // 3. ITEM
+              const item = d.itemName || d.product || '--';
+
+              // 4. CATEGORY
+              const category = d.category || 'General';
+
+              // 5. DESCRIPTION
+              const desc = d.description || 'No description';
+
+              // 6. RECIPIENT (Who got the money? School? Dept?)
+              const recipient = d.recipient || d.sellerName || 'Admin';
+
+              // 7. REF ID (Use specific refId field, or fallback to Document ID)
+              const refId = d.refId || doc.id.substring(0, 8).toUpperCase();
+
+              html += `
+              <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors text-sm">
+                  <td class="px-6 py-4 text-gray-500 font-mono whitespace-nowrap">${date}</td>
+                  <td class="px-6 py-4 font-medium text-gray-800 dark:text-white">${buyer}</td>
+                  <td class="px-6 py-4 text-gray-600 dark:text-gray-300">${item}</td>
+                  <td class="px-6 py-4"><span class="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-500">${category}</span></td>
+                  <td class="px-6 py-4 text-right font-bold text-green-600 whitespace-nowrap">+₱${amount.toLocaleString()}</td>
+                  <td class="px-6 py-4 text-gray-500 text-xs max-w-[200px] truncate" title="${desc}">${desc}</td>
+                  <td class="px-6 py-4 text-gray-600 dark:text-gray-400 text-xs">${recipient}</td>
+                  <td class="px-6 py-4 text-right text-xs font-mono text-gray-400">#${refId}</td>
+              </tr>`;
+          });
+
+          tbody.innerHTML = html;
+          if(totalDisplay) totalDisplay.innerText = "₱" + totalIncome.toLocaleString();
+      })
+      .catch(e => {
+          console.error(e);
+          tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-red-400">Error loading data.</td></tr>';
+      });
+}
+
+// --- NEW: GRAPH CALCULATOR ENGINE ---
+function updateFinanceChart() {
+    const ctx = document.getElementById('financeChart');
+    // Ensure the chart instance exists before updating
+    if (!ctx || !window.myFinanceChart) return; 
+
+    // Setup 4 buckets for Week 01, Week 02, Week 03, Week 04
+    let weeklyProfit = [0, 0, 0, 0]; 
+    const today = new Date();
+
+    db.collection('financials')
+      .orderBy('date', 'asc')
+      .get()
+      .then(snap => {
+          snap.forEach(doc => {
+              const d = doc.data();
+              // Only process "Income" and ensure a date exists
+              if (d.type === 'Income' && d.date) {
+                  const date = d.date.toDate();
+                  const amount = d.amount || 0;
+                  const myProfit = amount * PROFIT_PERCENTAGE; // Calculate 12% profit
+
+                  // Determine which week bucket the transaction falls into
+                  const diffTime = Math.abs(today - date);
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                  
+                  // 0-7 days = Week 4, 8-14 = Week 3, etc.
+                  let weekIndex = 3 - Math.floor(diffDays / 7);
+                  
+                  if (weekIndex >= 0 && weekIndex <= 3) {
+                      weeklyProfit[weekIndex] += myProfit;
+                  }
+              }
+          });
+
+          // Update the Chart.js data
+          window.myFinanceChart.data.datasets[0].data = weeklyProfit;
+          window.myFinanceChart.update();
+      })
+      .catch(e => console.error("Graph Sync Error:", e));
+}
+
+function updateDashboardStats() {
+    // 1. Existing Product/User counts
+    const activeProducts = globalProducts.filter(p => (p.Status || '').toLowerCase() === 'in stock').length;
+    const totalUsers = globalUsers.length;
+    if(document.getElementById('dash-active-products')) document.getElementById('dash-active-products').innerText = activeProducts;
+    if(document.getElementById('dash-total-users')) document.getElementById('dash-total-users').innerText = totalUsers;
+
+    // 2. Financial Calculation & Smart Sorting
+    db.collection('financials').orderBy('date', 'desc').get().then(snap => {
+        let netProfit = 0;
+        let totalOverallSales = 0;
+        let transactionCount = 0;
+        let weeklyBuckets = [0, 0, 0, 0]; // [Week 1, Week 2, Week 3, Week 4]
+        let allTransactions = []; 
+        
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        snap.forEach(doc => {
+            const d = doc.data();
+            if(d.type === 'Income' && d.date) {
+                const date = d.date.toDate();
+                const amount = parseFloat(d.amount) || 0;
+                
+                // Track Lifetime Totals
+                totalOverallSales += amount;
+                const adminProfit = amount * PROFIT_PERCENTAGE; // 12%
+                netProfit += adminProfit;
+                transactionCount++;
+
+                // Keep track of all items for the table
+                allTransactions.push({ id: doc.id, ...d });
+
+                // SMART WEEK Logic: Only graph data from the CURRENT MONTH
+                if (date.getMonth() === currentMonth && date.getFullYear() === currentYear) {
+                    const dayOfMonth = date.getDate();
+                    let weekIndex;
+
+                    if (dayOfMonth <= 7) weekIndex = 0;      // Week 1
+                    else if (dayOfMonth <= 14) weekIndex = 1; // Week 2
+                    else if (dayOfMonth <= 21) weekIndex = 2; // Week 3 (Feb 18 is here)
+                    else weekIndex = 3;                       // Week 4
+
+                    weeklyBuckets[weekIndex] += adminProfit;
+                }
+            }
+        });
+
+        // 3. UPDATE UI CARDS
+        const formattedNet = "₱" + netProfit.toLocaleString(undefined, {minimumFractionDigits: 2});
+        const formattedGross = "₱" + totalOverallSales.toLocaleString(undefined, {minimumFractionDigits: 2});
+
+        if(document.getElementById('dash-total-revenue')) document.getElementById('dash-total-revenue').innerText = formattedNet;
+        if(document.getElementById('fin-total-revenue')) document.getElementById('fin-total-revenue').innerText = formattedNet;
+        if(document.getElementById('dash-total-overall-sales')) document.getElementById('dash-total-overall-sales').innerText = formattedGross;
+        if(document.getElementById('dash-total-orders')) document.getElementById('dash-total-orders').innerText = transactionCount;
+
+        // 4. RENDER ORDER HISTORY (LIMIT TO 4)
+        const orderHistoryBody = document.getElementById('finance-orders-table');
+        if (orderHistoryBody) {
+            const recentFour = allTransactions.slice(0, 4);
+            orderHistoryBody.innerHTML = recentFour.map(order => {
+                const dateStr = order.date ? order.date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A';
+                return `
+                    <tr class="border-b border-gray-100 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                        <td class="py-4 font-medium text-gray-800 dark:text-gray-200">${order.buyerName || 'Walk-in'}</td>
+                        <td class="py-4 text-gray-600 dark:text-gray-400">${order.itemName || 'Item'}</td>
+                        <td class="py-4 text-gray-600 dark:text-gray-400">${dateStr}</td>
+                        <td class="py-4 text-right font-medium text-gray-800 dark:text-gray-200">₱${parseFloat(order.amount).toLocaleString()}</td>
+                        <td class="py-4 text-right">
+                            <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-600">Completed</span>
+                        </td>
+                    </tr>`;
+            }).join('');
+        }
+
+        // 5. UPDATE GRAPH (10,000 Goal)
+        if (window.myFinanceChart) {
+            window.myFinanceChart.data.datasets[0].data = weeklyBuckets;
+            window.myFinanceChart.options.scales.y.min = 0;
+            window.myFinanceChart.options.scales.y.max = 1000;
+            window.myFinanceChart.update();
+        }
+    });
+}
