@@ -254,15 +254,75 @@ function updateDashboardStats() {
 function renderProducts() {
     const tDashboard = document.querySelector('#productsTable tbody');
     const tAllItems = document.getElementById('tbody-all-items');
-    if (tDashboard) tDashboard.innerHTML = ''; if (tAllItems) tAllItems.innerHTML = '';
+    
+    if (tDashboard) tDashboard.innerHTML = ''; 
+    if (tAllItems) tAllItems.innerHTML = '';
 
     globalProducts.forEach(p => {
-        const name = p.Product || p.name || 'Unnamed'; const img = p.Image || `https://ui-avatars.com/api/?name=${name}&background=eee`;
-        const price = p.Price || p.price || 0; const stock = p.Stock || p.stock || 0; const status = p.Status || p.status || 'Unknown';
+        const name = p.Product || p.name || 'Unnamed'; 
+        const img = p.Image || `https://ui-avatars.com/api/?name=${name}&background=eee`;
+        const price = p.Price || 0; 
+        const stock = p.Stock || 0; 
+        const status = p.Status || 'Unknown';
 
-        if (tDashboard && globalProducts.indexOf(p) < 5) tDashboard.innerHTML += `<tr class="border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"><td class="py-3 pl-2 font-medium">${name}</td><td class="py-3 text-gray-600">₱${price}</td><td class="py-3 text-gray-600">${stock}</td><td class="py-3 text-right pr-2"><span class="${getStatusBadge(status)}">${status}</span></td></tr>`;
-        if (tAllItems) tAllItems.innerHTML += `<tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors text-sm"><td class="px-6 py-4 flex items-center gap-3"><img src="${img}" class="w-10 h-10 rounded-lg object-cover shadow-sm"><div><p class="font-bold text-gray-700 dark:text-gray-300">${name}</p><p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6).toUpperCase()}</p></div></td><td class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Category || '--'}</td><td class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Recipient || '--'}</td><td class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">₱${price}</td><td class="px-6 py-4 text-gray-600 dark:text-gray-400">${stock}</td><td class="px-6 py-4 text-right"><span class="${getStatusBadge(status)}">${status}</span></td><td class="px-6 py-4 text-right flex justify-end gap-2"><button onclick="editProduct('${p.id}')" class="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-all"><i data-lucide="edit-3" class="w-4 h-4"></i></button><button onclick="deleteItem('products', '${p.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td></tr>`;
+        // --- 1. PREMIUM DASHBOARD VIEW (Inventory Monitor) ---
+        if (tDashboard && globalProducts.indexOf(p) < 5) {
+            const stockPercent = Math.min((stock / 100) * 100, 100);
+            const barColor = stock < 10 ? 'bg-red-500' : 'bg-green-500';
+
+            tDashboard.innerHTML += `
+            <tr onclick="viewProductDetails('${p.id}')" class="group hover:bg-slate-50 dark:hover:bg-white/5 transition-all cursor-pointer">
+                <td class="px-8 py-5 flex items-center gap-4">
+                    <img src="${img}" class="w-12 h-12 rounded-2xl object-cover grayscale group-hover:grayscale-0 transition-all duration-500 shadow-sm border border-gray-100 dark:border-dark-border">
+                    <div>
+                        <p class="font-bold text-slate-700 dark:text-white leading-none mb-1">${name}</p>
+                        <p class="text-[10px] text-slate-400 font-mono uppercase">ID: ${p.id.substring(0,6)}</p>
+                    </div>
+                </td>
+                <td class="px-8 py-5">
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1 bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full w-24 overflow-hidden">
+                            <div class="h-full ${barColor} transition-all duration-1000" style="width: ${stockPercent}%"></div>
+                        </div>
+                        <span class="text-xs font-bold text-slate-500">${stock}</span>
+                    </div>
+                </td>
+                <td class="px-8 py-5 text-right">
+                    <span class="${getStatusBadge(status)} badge-premium uppercase tracking-tighter shadow-sm">${status}</span>
+                </td>
+            </tr>`;
+        }
+
+        // --- 2. ALL ITEMS VIEW (Full Inventory Table) ---
+        if (tAllItems) {
+            tAllItems.innerHTML += `
+            <tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors text-sm cursor-pointer">
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 flex items-center gap-3">
+                    <img src="${img}" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                    <div>
+                        <p class="font-bold text-gray-700 dark:text-gray-300">${name}</p>
+                        <p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6).toUpperCase()}</p>
+                    </div>
+                </td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Category || '--'}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Recipient || '--'}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">₱${price.toLocaleString()}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400 font-mono">${stock}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-right">
+                    <span class="${getStatusBadge(status)}">${status}</span>
+                </td>
+                <td class="px-6 py-4 text-right flex justify-end gap-2">
+                    <button onclick="event.stopPropagation(); editProduct('${p.id}')" class="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-all">
+                        <i data-lucide="edit-3" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteItem('products', '${p.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </td>
+            </tr>`;
+        }
     });
+
     if(window.lucide) lucide.createIcons();
 }
 
@@ -881,6 +941,28 @@ function setupSearch() {
         }
     });
 }
+
+window.viewProductDetails = function(id) {
+    const p = globalProducts.find(x => x.id === id);
+    if (!p) return;
+
+    // Fill Modal Data
+    document.getElementById('detail-img').src = p.Image || `https://ui-avatars.com/api/?name=${p.Product}&background=eee`;
+    document.getElementById('detail-name').innerText = p.Product || 'Unnamed Item';
+    document.getElementById('detail-id').innerText = `#${p.id.toUpperCase()}`;
+    document.getElementById('detail-category').innerText = p.Category || 'General';
+    document.getElementById('detail-price').innerText = `₱${(p.Price || 0).toLocaleString()}`;
+    document.getElementById('detail-stock').innerText = `${p.Stock || 0} units`;
+    document.getElementById('detail-recipient').innerText = p.Recipient || '--';
+    document.getElementById('detail-status').innerText = p.Status || 'In Stock';
+    
+    // The missing piece: The Description
+    const descEl = document.getElementById('detail-desc');
+    descEl.innerText = p.Description && p.Description.trim() !== "" ? p.Description : "This item has no additional administrative notes or description.";
+
+    if(window.lucide) lucide.createIcons();
+    openModal('productDetailModal');
+};
 
 
 // ==========================================
