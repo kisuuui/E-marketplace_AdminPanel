@@ -1,0 +1,54 @@
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .4; }
+}
+
+.animate-skeleton {
+    /* Changed the '1' to 'infinite' */
+    animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; 
+}
+
+.skeleton-box {
+    background-color: #e5e7eb;
+    border-radius: 0.5rem;
+}
+
+.dark .skeleton-box {
+    background-color: #2d2d3a;
+}
+
+/* Glassmorphism Sidebar */
+aside {
+    background: rgba(255, 255, 255, 0.8) !important;
+    backdrop-filter: blur(12px);
+    border-right: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+.dark aside {
+    background: rgba(28, 28, 36, 0.8) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Sophisticated Shadows */
+.premium-card {
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 10px 20px rgba(0,0,0,0.03);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.premium-card:hover {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02);
+    transform: translateY(-2px);
+}
+
+/* Modern Typography */
+.font-heading { font-family: 'Public Sans', sans-serif; letter-spacing: -0.02em; }
+.text-label { color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.65rem; }
+
+/* Dashboard Status Pill Upgrade */
+.badge-premium {
+    padding: 2px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
