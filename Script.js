@@ -97,20 +97,43 @@ async function fetchAndSyncUserProfile(user) {
     try {
         const doc = await userRef.get();
         const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        let profileData;
+
         if (doc.exists) {
-            const data = doc.data();
-            updateProfileUI(data.name || "Admin", data.role || "Admin", user.email, data.photoURL);
-            if (data.role === 'Super Admin') {
+            profileData = doc.data();
+            updateProfileUI(profileData.name || "Admin", profileData.role || "Admin", user.email, profileData.photoURL);
+            
+            if (profileData.role === 'Super Admin') {
                 const logBtn = document.getElementById('nav-logs');
                 if (logBtn) logBtn.classList.remove('hidden');
             }
             await userRef.update({ lastLogin: timestamp });
         } else {
-            const newProfile = { name: "Admin User", email: user.email, role: "Admin", createdAt: timestamp, lastLogin: timestamp };
-            await userRef.set(newProfile);
-            updateProfileUI(newProfile.name, newProfile.role, user.email);
+            profileData = { name: "Admin User", email: user.email, role: "Admin", createdAt: timestamp, lastLogin: timestamp };
+            await userRef.set(profileData);
+            updateProfileUI(profileData.name, profileData.role, user.email);
         }
-    } catch (e) { console.error("Profile Error", e); }
+
+        // --- NEW DYNAMIC GREETING LOGIC (The "Team" addition) ---
+        // 1. Get first name
+        const firstName = profileData.name.split(' ')[0];
+        document.querySelectorAll('.user-first-name').forEach(el => el.innerText = firstName);
+
+        // 2. Time-aware greeting
+        const hour = new Date().getHours();
+        let welcome;
+        if (hour < 12) welcome = "Good morning";
+        else if (hour < 18) welcome = "Good afternoon";
+        else welcome = "Good evening";
+
+        const greetingEl = document.getElementById('greeting-text');
+        if (greetingEl) greetingEl.innerText = welcome;
+        // -------------------------------------------------------
+
+    } catch (e) { 
+        console.error("Profile Error", e); 
+    }
 }
 
 function updateProfileUI(name, role, email, photoURL) {
@@ -121,6 +144,8 @@ function updateProfileUI(name, role, email, photoURL) {
         const el = document.getElementById(id); if(el) el.src = imgUrl;
     });
 }
+
+
 
 
 // ==========================================
@@ -166,6 +191,16 @@ function initDataListeners() {
         const bellDot = document.querySelector('.absolute.top-2.right-2.bg-red-500');
         if (bellDot) snap.size > 0 ? bellDot.classList.remove('hidden') : bellDot.classList.add('hidden');
     });
+
+    db.collection('users').onSnapshot(snap => {
+    globalUsers = [];
+    snap.forEach(doc => {
+        // We spread the data and add the ID as both 'id' and 'uid' 
+        // to make sure your .find() logic never fails
+        globalUsers.push({ id: doc.id, uid: doc.id, ...doc.data() });
+    });
+    renderUsers(); // Refresh the table whenever a promotion happens!
+});
 }
 
 
@@ -368,18 +403,86 @@ function renderPendingApprovals() {
 }
 
 function renderUsers() {
-    const tCus = document.getElementById('tbody-customers'); const tSel = document.getElementById('tbody-sellers'); const tUnv = document.getElementById('tbody-unverified');
-    if(tCus) tCus.innerHTML = ''; if(tSel) tSel.innerHTML = ''; if(tUnv) tUnv.innerHTML = '';
+    const tCus = document.getElementById('tbody-customers'); 
+    const tSel = document.getElementById('tbody-sellers'); 
+    const tUnv = document.getElementById('tbody-unverified');
+    
+    if(tCus) tCus.innerHTML = ''; 
+    if(tSel) tSel.innerHTML = ''; 
+    if(tUnv) tUnv.innerHTML = '';
+
+    // --- TEAM DEBUG: Let's see what the role is ---
+    const roleElement = document.querySelector('.user-role');
+    const loggedInRole = roleElement ? roleElement.innerText.trim().toUpperCase() : "";
+    console.log("Current Logged-in Role (Hardened):", loggedInRole);
 
     globalUsers.forEach(u => {
-        const name = u.name || 'Unknown'; const isVerified = u.verified === true || u.status === 'Active'; 
-        const row = `<tr class="border-b border-gray-50 dark:border-dark-border table-row-hover transition-colors"><td class="px-6 py-4 flex items-center gap-3"><img src="https://ui-avatars.com/api/?name=${name}&background=random&color=fff" class="w-8 h-8 rounded-full shadow-sm"><div><p class="font-bold text-sm text-gray-700 dark:text-gray-300">${name}</p><p class="text-xs text-gray-400">${u.email || ''}</p></div></td><td class="px-6 py-4 text-gray-600 dark:text-gray-400">${u.userType || u.type || 'Customer'}</td><td class="px-6 py-4"><span class="badge-${(u.role || 'User').toLowerCase()}">${u.role || 'User'}</span></td><td class="px-6 py-4">${isVerified ? '<span class="badge-verified">Verified</span>' : '<span class="text-red-500 font-bold text-xs bg-red-50 px-2 py-1 rounded">Unverified</span>'}</td><td class="px-6 py-4 text-right">${!isVerified ? `<button onclick="openVerifyModal('${u.id}', '${u.email}')" class="text-blue-600 hover:text-blue-800 text-xs font-bold mr-3">Verify</button>` : ''}<button onclick="deleteItem('users', '${u.id}')" class="text-red-400 hover:text-red-600 p-1.5"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td></tr>`;
+        const name = u.name || 'Unknown'; 
+        const isVerified = u.verified === true || u.status === 'Active'; 
+        const userId = u.id || u.uid; 
+        const currentType = (u.userType || u.type || 'Customer').toUpperCase();
+        const currentRole = (u.role || 'User').toUpperCase();
 
-        if (!isVerified) { if(tUnv) tUnv.innerHTML += row; } 
-        else if (u.userType === 'Seller' || u.userType === 'Staff') { if(tSel) tSel.innerHTML += row; } 
-        else { if(tCus) tCus.innerHTML += row; }
-    });
-    if(window.lucide) lucide.createIcons();
+        // 1. Logic for Promotion Button
+        let promoBtn = "";
+        
+        // CHECK 1: Are you a Super Admin? Is the user Staff? Are they not yet an Admin?
+        if (loggedInRole === "SUPER ADMIN") {
+            if (currentType === "STAFF" && currentRole !== "ADMIN") {
+                promoBtn = `<button onclick="promoteUser('${userId}')" class="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 hover:bg-red-600 hover:text-white transition-all mr-2 font-black uppercase tracking-tighter">Promote to Admin</button>`;
+            }
+        } 
+        // CHECK 2: Are you a standard Admin? Is the user a Customer?
+        else if (loggedInRole === "ADMIN") {
+            if (currentType === "CUSTOMER" && isVerified) {
+                promoBtn = `<button onclick="promoteUser('${userId}')" class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 hover:bg-blue-600 hover:text-white transition-all mr-2 font-black uppercase tracking-tighter">Make Staff</button>`;
+            }
+        }
+
+    // 2. The Complete Row Template
+    const row = `
+    <tr class="border-b border-gray-50 dark:border-dark-border table-row-hover transition-colors">
+        <td class="px-6 py-4 flex items-center gap-3">
+            <img src="https://ui-avatars.com/api/?name=${name}&background=random&color=fff" class="w-8 h-8 rounded-full shadow-sm">
+            <div>
+                <p class="font-bold text-sm text-gray-700 dark:text-gray-300 leading-none mb-1">${name}</p>
+                <p class="text-[10px] text-gray-400 font-mono">${u.email || ''}</p>
+            </div>
+        </td>
+        <td class="px-6 py-4 text-gray-600 dark:text-gray-400 font-medium">${currentType}</td>
+        <td class="px-6 py-4">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                ${u.role || 'User'}
+            </span>
+        </td>
+        <td class="px-6 py-4">
+            ${isVerified 
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-600 uppercase tracking-tighter">Verified</span>' 
+                : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-500 uppercase tracking-tighter">Unverified</span>'}
+        </td>
+        <td class="px-6 py-4 text-right">
+            <div class="flex items-center justify-end">
+                ${!isVerified ? `<button onclick="openVerifyModal('${userId}', '${u.email}')" class="text-blue-600 hover:text-blue-800 text-xs font-bold mr-3">Verify</button>` : ''}
+                
+                ${promoBtn}
+
+                <button onclick="deleteItem('users', '${userId}')" class="text-red-400 hover:text-red-600 p-1.5 transition-colors">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </td>
+    </tr>`;
+
+    // 3. Sorting into Tabs (Simplified Logic)
+    if (!isVerified) { 
+        if(tUnv) tUnv.innerHTML += row; 
+    } else if (currentType === 'Seller' || currentType === 'Staff') { 
+        if(tSel) tSel.innerHTML += row; 
+    } else { 
+        if(tCus) tCus.innerHTML += row; 
+    }
+});
+
 }
 
 function renderTransactions() {
@@ -1083,61 +1186,115 @@ function renderLogs() {
     const tbody = document.getElementById('tbody-logs'); 
     if (!tbody) return;
     
-    // 1. Force the skeleton to show while we fetch
     triggerSkeleton('tbody-logs', 10, 4);
 
-    // 2. Fetch from Firebase
-    // Note: We search for the exact currentLogTab (e.g., 'Activity')
     db.collection('logs')
         .where('level', '==', currentLogTab) 
         .orderBy('timestamp', 'desc')
         .limit(50)
         .get()
         .then(snap => {
-            tbody.innerHTML = ''; // Clear skeletons
+            tbody.innerHTML = ''; 
             
             if (snap.empty) { 
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" class="px-6 py-16 text-center">
-                            <div class="flex flex-col items-center justify-center text-gray-400">
-                                <i data-lucide="database-zap" class="w-10 h-10 mb-3 opacity-20"></i>
-                                <p class="font-medium text-base">No ${currentLogTab} records found</p>
-                                <p class="text-xs mt-1">Actions tagged as "${currentLogTab}" will appear here in real-time.</p>
-                            </div>
-                        </td>
-                    </tr>`;
-                if(window.lucide) lucide.createIcons();
+                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-16 text-center text-gray-400 italic">No ${currentLogTab} records found.</td></tr>`;
                 return; 
             }
 
             let html = '';
             snap.forEach(doc => {
                 const d = doc.data();
-                const time = d.timestamp ? d.timestamp.toDate().toLocaleString('en-GB') : 'Just now';
+                const time = d.timestamp ? d.timestamp.toDate().toLocaleString('en-GB', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'}) : 'Just now';
                 
-                // Set the color theme based on the level
-                let levelBadge = "";
-                if(currentLogTab === 'Audit') levelBadge = "text-red-600 bg-red-50 dark:bg-red-900/20";
-                else if(currentLogTab === 'System') levelBadge = "text-amber-600 bg-amber-50 dark:bg-amber-900/20";
-                else levelBadge = "text-blue-600 bg-blue-50 dark:bg-blue-900/20";
+                let badgeClasses = "text-blue-600 bg-blue-50 dark:bg-blue-900/20";
+                if(currentLogTab === 'Audit') badgeClasses = "text-red-600 bg-red-50 dark:bg-red-900/20";
+                if(currentLogTab === 'System') badgeClasses = "text-amber-600 bg-amber-50 dark:bg-amber-900/20";
 
                 html += `
-                <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors border-b dark:border-dark-border">
-                    <td class="px-6 py-4 text-gray-500 text-xs font-mono">${time}</td>
-                    <td class="px-6 py-4 font-medium text-gray-700 dark:text-gray-300">${d.adminName || 'Admin'}</td>
-                    <td class="px-6 py-4">
-                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-tight ${levelBadge}">
+                <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-all border-b dark:border-dark-border">
+                    <td class="pl-12 pr-6 py-4 text-gray-400 text-xs font-mono w-[20%] whitespace-nowrap">
+                        ${time}
+                    </td>
+                    
+                    <td class="px-10 py-4 font-semibold text-gray-700 dark:text-gray-300 w-[20%] truncate">
+                        ${d.adminName || 'Admin'}
+                    </td>
+                    
+                    <td class="px-10 py-4 w-[25%]">
+                        <span class="inline-flex items-center justify-center px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter whitespace-nowrap ${badgeClasses} shadow-sm">
                             ${d.action}
                         </span>
                     </td>
-                    <td class="px-6 py-4 text-gray-500 font-mono text-xs italic">${d.details}</td>
+                    
+                    <td class="pl-10 pr-12 py-4 text-gray-400 font-mono text-xs italic w-[35%]">
+                        <div class="line-clamp-1 hover:line-clamp-none transition-all duration-300 cursor-help">
+                            ${d.details}
+                        </div>
+                    </td>
                 </tr>`;
             });
             tbody.innerHTML = html;
-        })
-        .catch(err => {
-            console.error("Log Fetch Error:", err);
-            tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 font-bold text-xs uppercase tracking-widest">Query Error: Check Console</td></tr>`;
         });
 }
+
+window.promoteUser = async function(targetUid) {
+    // 1. Get the current logged-in role from the sidebar (Hardened Check)
+    const roleEl = document.querySelector('.user-role');
+    const loggedInRole = roleEl ? roleEl.innerText.trim().toUpperCase() : "";
+    
+    // 2. Find the user we want to promote
+    const targetUser = globalUsers.find(u => (u.id || u.uid) === targetUid);
+    if (!targetUser) return alert("User not found.");
+
+    // Define placeholders for the new data
+    let newType = (targetUser.type || targetUser.userType || "Customer");
+    let newRole = "";
+
+    // 3. The Logic Gate (Case-Insensitive)
+    if (loggedInRole === "SUPER ADMIN") {
+        // Super Admin can turn Staff into Admin
+        if (newType === "Staff") {
+            newRole = "Admin";
+        } else {
+            return alert("Super Admins can only promote Staff to Admin.");
+        }
+    } 
+    else if (loggedInRole === "ADMIN") {
+        // Admin can turn Customer into Staff
+        if (newType === "Customer") {
+            newType = "Staff";
+            newRole = "User";
+        } else {
+            return alert("Admins can only promote Customers to Staff.");
+        }
+    } 
+    else {
+        console.log("Team Debug - Failed Role Check:", loggedInRole);
+        return alert("You do not have permission to promote users.");
+    }
+
+    // 4. Execute Firebase Update
+    if (confirm(`Promote ${targetUser.name} to ${newRole === 'Admin' ? 'Admin' : 'Staff'}?`)) {
+        try {
+            await db.collection('users').doc(targetUid).update({
+                type: newType,
+                userType: newType, // Keeps both fields synced
+                role: newRole,
+                promotedBy: auth.currentUser.email,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // 5. Log the Audit Trail
+            await logAction("User Promotion", `Promoted ${targetUser.name} to ${newRole}`, "Audit");
+            
+            alert("Promotion successful!");
+
+            // Refresh the UI so the button disappears and badges update
+            if (typeof renderUsers === 'function') renderUsers();
+
+        } catch (e) {
+            console.error("Promotion Error:", e);
+            alert("Failed to update user. Check Firebase Rules.");
+        }
+    }
+};
