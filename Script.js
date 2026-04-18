@@ -158,15 +158,33 @@ function initDataListeners() {
     triggerSkeleton('activity-list', 3, 1);
 
     // Products
-    db.collection('products').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalProducts = [];
-        snap.forEach(d => globalProducts.push({ id: d.id, ...d.data() }));
-        renderProducts();
-        renderSchoolListings();
-        renderPendingApprovals();
-        updateDashboardStats(); 
-    });
+    let productsGeneral = [];
+    let productsVendors = [];
 
+// PATH 1: The original flat 'products' collection
+db.collection('products').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    productsGeneral = [];
+    snap.forEach(d => productsGeneral.push({ id: d.id, path: d.ref.path, ...d.data() }));
+    mergeAndRefreshProducts();
+});
+
+// PATH 2: The nested 'Vendor-product/{UID}/listings' sub-collections
+db.collectionGroup('listings').onSnapshot(snap => {
+    productsVendors = [];
+    snap.forEach(d => productsVendors.push({ id: d.id, path: d.ref.path, ...d.data() }));
+    mergeAndRefreshProducts();
+}, err => {
+    console.warn("CollectionGroup error (Index likely needed):", err);
+});
+
+// Helper function to combine them
+function mergeAndRefreshProducts() {
+    globalProducts = [...productsGeneral, ...productsVendors];
+    renderProducts();
+    renderSchoolListings();
+    renderPendingApprovals();
+    updateDashboardStats();
+}
     // Users
     db.collection('users').orderBy('createdAt', 'desc').onSnapshot(snap => {
         globalUsers = [];
