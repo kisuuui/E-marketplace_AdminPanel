@@ -11,16 +11,21 @@ const firebaseConfig = {
     measurementId: "G-0L7G265Q5F"
 };
 
-const ALLOWED_ADMINS = ["admin@scc.com", "justinvenedict.scc@gmail.com"];
+const ALLOWED_ADMINS = ["admin@scc.com", "justinvenedict.scc@gmail.com", "valeriebilo.scc@gmail.com"];
 const PROFIT_PERCENTAGE = 0.12;
 
 let auth, db; 
-let globalUsers = [], globalProducts = [], globalTickets = [];
+let globalUsers = [], globalProducts = [], globalTickets = [], globalReports = [];
+let activeReportMessages = [];
+let activeReportMessagesReportId = '';
+let unsubscribeActiveReportMessages = null;
 let currentTab = 'customers';
+let currentInventoryTab = 'verified';
 let editingProductId = null;
 let currentCalendarDate = new Date(); 
 let selectedFullDate = new Date();
 let currentLogTab = 'Activity';
+let hasInitializedDataListeners = false;
 
 try {
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -151,57 +156,579 @@ function updateProfileUI(name, role, email, photoURL) {
 // ==========================================
 // 3. MASTER DATA LISTENERS 
 // ==========================================
+
+// --- REPLACE JUST THE TOP OF SECTION 3 ---
+let productsApproved = [];
+let productsVendors = [];
+let productsPending = [];
+
+function getProductMergeKey(product = {}) {
+    const sellerUid = product.sellerUid || product.sellerId || '';
+    const productId = product.productId || product.id || '';
+    const name = String(product.Product || product.name || '').trim().toLowerCase();
+    return `${sellerUid}::${productId || name}::${name}`;
+}
+
+function getProductSourcePriority(product = {}) {
+    const source = String(product.source || '');
+    if (source === 'ApprovedMarketplace') return 4;
+    if (source === 'MobilePending') return 3;
+    if (source === 'VendorPortal') return 2;
+    return 0;
+}
+
+function mergeAndRefreshProducts() {
+    const merged = [...productsApproved, ...productsVendors, ...productsPending];
+    const dedupedProducts = new Map();
+
+    merged.forEach(product => {
+        const key = getProductMergeKey(product);
+        const existing = dedupedProducts.get(key);
+        if (!existing || getProductSourcePriority(product) >= getProductSourcePriority(existing)) {
+            dedupedProducts.set(key, product);
+        }
+    });
+
+    globalProducts = Array.from(dedupedProducts.values());
+    console.log("📊 Data Sync: Approved(", productsApproved.length, ") | Vendor(", productsVendors.length, ") | Pending(", productsPending.length, ")");
+    
+    renderProducts();
+    renderSchoolListings();
+    renderPendingApprovals();
+    updateDashboardStats();
+}
+
+function normalizeProduct(doc, source) {
+    const data = doc.data ? doc.data() : doc;
+    const rawName = data.Product || data.name || 'Unnamed Item';
+    const imageCollection = Array.isArray(data.imageUrls) ? data.imageUrls : (Array.isArray(data.photoURLs) ? data.photoURLs : []);
+    const rawImage = data.Image || data.imageUrl || data.photoURL || imageCollection[0];
+    const workflowStatus = normalizeWorkflowStatus(data.Status ?? data.status, source);
+    const availability = normalizeAvailability(data, workflowStatus);
+    const rawStock = data.Stock ?? data.stock ?? data.Stock_count ?? data.stock_count ?? data.stockCount;
+
+    return {
+        ...data,
+        id: doc.id || data.id,
+        path: doc.ref ? doc.ref.path : (data.path || ''),
+        source,
+        Product: rawName,
+        Price: Number(data.Price ?? data.price ?? 0) || 0,
+        Stock: rawStock === undefined || rawStock === null || rawStock === '' ? null : Number(rawStock),
+        Category: data.Category || data.category || '--',
+        DepartmentTag: data.DepartmentTag || data.departmentTag || '',
+        departmentTag: data.departmentTag || data.DepartmentTag || '',
+        Status: workflowStatus,
+        WorkflowStatus: workflowStatus,
+        Availability: availability,
+        Recipient: data.Recipient || data.vendorName || data.recipientName || data.sellerName || '--',
+        displayVendor: data.displayVendor || data.Recipient || data.vendorName || data.recipientName || data.sellerName || '--',
+        Description: data.Description || data.description || '',
+        Condition: data.Condition || data.condition || '',
+        Image: rawImage,
+        imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : (Array.isArray(data.photoURLs) ? data.photoURLs : (rawImage ? [rawImage] : [])),
+        SizeStocks: data.SizeStocks || data.sizeStocks || {},
+        sellerEmail: data.sellerEmail || '',
+        sellerName: data.sellerName || data.vendorName || data.recipientName || '',
+        recipientName: data.recipientName || '',
+        vendorName: data.vendorName || data.sellerName || data.recipientName || ''
+    };
+}
+
+function getProductById(id) {
+    return globalProducts.find(product => product.id === id);
+}
+
+function getProductRecipient(product) {
+    return product.Recipient || '--';
+}
+
+function getProductName(product) {
+    return product.Product || 'Unnamed Item';
+}
+
+function getProductImage(product) {
+    const candidates = [
+        product.Image,
+        product.imageUrl,
+        product.photoURL,
+        Array.isArray(product.imageUrls) ? product.imageUrls[0] : '',
+        Array.isArray(product.photoURLs) ? product.photoURLs[0] : '',
+        product.thumbnailUrl
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const value = String(candidate).trim();
+        if (!value) continue;
+        if (value.startsWith('data:image/')) return value;
+        if (/^https?:\/\//i.test(value)) return value;
+        if (/^gs:\/\//i.test(value)) return value;
+    }
+
+    return getProductImageFallback(product);
+}
+
+function getProductImageFallback(product) {
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(getProductName(product))}&background=eee`;
+}
+
+window.handleProductImageError = function(imgEl, productName) {
+    if (imgEl.dataset.fallbackApplied === 'true') return;
+    imgEl.dataset.fallbackApplied = 'true';
+    imgEl.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(productName || 'Product')}&background=eee`;
+}
+
+function getProductCategory(product) {
+    return product.Category || '--';
+}
+
+function getProductPrice(product) {
+    return Number(product.Price ?? 0) || 0;
+}
+
+function formatPeso(value) {
+    return `\u20B1${Number(value || 0).toLocaleString()}`;
+}
+
+function getCurrentAdminName() {
+    const adminName = document.querySelector('.user-name');
+    return adminName ? adminName.innerText.trim() : '';
+}
+
+function isSizedCategory(category = '') {
+    const normalized = String(category || '').trim().toLowerCase();
+    return [
+        'school uniform and clothings',
+        'school uniform & clothing',
+        'sports & pe',
+        'pe and sports'
+    ].includes(normalized);
+}
+
+function formatCurrencyInputValue(value) {
+    const digits = String(value || '').replace(/[^\d.]/g, '');
+    if (!digits) return '';
+
+    const [wholeRaw, decimalRaw = ''] = digits.split('.');
+    const whole = wholeRaw.replace(/^0+(?=\d)/, '') || '0';
+    const formattedWhole = Number(whole).toLocaleString('en-PH');
+    const decimal = decimalRaw.slice(0, 2);
+    return `PHP ${formattedWhole}${decimal ? `.${decimal}` : ''}`;
+}
+
+function parseCurrencyInputValue(value) {
+    const sanitized = String(value || '').replace(/[^\d.]/g, '');
+    const parsed = Number(sanitized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function setCurrencyInputValue(inputId, value) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = value ? formatCurrencyInputValue(value) : '';
+}
+
+function setConditionSelection(groupName, value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    const inputs = Array.from(document.querySelectorAll(`input[name="${groupName}"]`));
+
+    inputs.forEach(input => {
+        input.checked = false;
+        input.parentElement?.classList.remove('active');
+    });
+
+    if (!normalized) return;
+
+    const matchedInput = inputs.find(input => input.value.trim().toLowerCase() === normalized);
+    if (!matchedInput) return;
+
+    matchedInput.checked = true;
+    matchedInput.parentElement?.classList.add('active');
+}
+
+function getSelectedCondition(groupName) {
+    const selected = Array.from(document.querySelectorAll(`input[name="${groupName}"]`)).find(input => input.checked);
+    return selected ? selected.value : '';
+}
+
+function readSizeStocks(sectionId) {
+    const section = document.getElementById(sectionId);
+    const sizeStocks = {};
+    if (!section || section.classList.contains('hidden')) return sizeStocks;
+
+    section.querySelectorAll('.size-stock-grid > div').forEach(row => {
+        const size = row.querySelector('.size-label')?.value.trim();
+        const stock = row.querySelector('.size-stock')?.value.trim();
+        if (!size || stock === '') return;
+        const parsed = Number(stock);
+        if (!Number.isNaN(parsed)) sizeStocks[size] = parsed;
+    });
+    return sizeStocks;
+}
+
+function populateSizeStocks(sectionId, sizeStocks = {}) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+
+    const entries = Object.entries(sizeStocks || {});
+    const rows = Array.from(section.querySelectorAll('.size-stock-grid > div'));
+    rows.forEach((row, index) => {
+        const [size = row.querySelector('.size-label')?.defaultValue || '', stock = ''] = entries[index] || [];
+        const sizeInput = row.querySelector('.size-label');
+        const stockInput = row.querySelector('.size-stock');
+        if (sizeInput) sizeInput.value = size || '';
+        if (stockInput) stockInput.value = stock !== '' ? stock : '';
+    });
+}
+
+function toggleSizeStockSection(prefix) {
+    const category = document.getElementById(`${prefix}_category`)?.value || '';
+    const section = document.getElementById(`${prefix}_size_stock_section`);
+    if (!section) return;
+    section.classList.toggle('hidden', !isSizedCategory(category));
+}
+
+function renderImagePreview(containerId, imageSources = []) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = imageSources.slice(0, 3).map(src => `
+        <div class="image-preview-card">
+            <img src="${src}" onerror="this.closest('.image-preview-card').remove()">
+        </div>
+    `).join('');
+}
+
+function collectProductImageFiles(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input || !input.files) return [];
+    return Array.from(input.files).slice(0, 3);
+}
+
+async function uploadProductImages(files, fallbackName) {
+    if (!files.length) return [];
+    const uploaded = await Promise.all(files.map(file => uploadToCloudinary(file)));
+    return uploaded.filter(Boolean).slice(0, 3);
+}
+
+function buildProductImageFields(imageUrls, name) {
+    const images = imageUrls.length ? imageUrls.slice(0, 3) : [`https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=eee`];
+    return {
+        Image: images[0],
+        Images: images,
+        imageUrl: images[0],
+        photoURL: images[0],
+        imageUrls: images,
+        photoURLs: images
+    };
+}
+
+function hasNumericStock(product) {
+    return product.Stock !== undefined && product.Stock !== null && product.Stock !== '' && !Number.isNaN(Number(product.Stock));
+}
+
+function getProductStockDisplay(product) {
+    if (hasNumericStock(product)) return String(Number(product.Stock) || 0);
+    return product.Availability || normalizeAvailability(product, product.WorkflowStatus || product.Status || '') || 'In Stock';
+}
+
+function getProductStockMetric(product) {
+    if (hasNumericStock(product)) return Number(product.Stock) || 0;
+
+    const availability = String(product.Availability || normalizeAvailability(product, product.WorkflowStatus || product.Status || '') || '').toLowerCase();
+    if (availability === 'out of stock') return 0;
+    if (availability === 'low stock') return 10;
+    return 100;
+}
+
+function getPendingSubmitter(product) {
+    return product.sellerName || product.vendorName || product.Recipient || product.recipientName || 'User';
+}
+
+function normalizeUserVerificationState(user = {}) {
+    const verifiedValue = String(user.verified ?? '').trim().toLowerCase();
+
+    if (user.emailVerified === true) return true;
+    if (user.verified === true) return true;
+    if (verifiedValue === 'verified') return true;
+
+    if (user.verified === false) return false;
+    if (verifiedValue === 'unverified') return false;
+
+    return false;
+}
+
+function getUserTypeLabel(user = {}) {
+    return String(user.userType || user.usertype || user.type || 'user').trim() || 'user';
+}
+
+function getUserAvatar(user = {}) {
+    const candidates = [
+        user.profileImage,
+        user.photoURL,
+        user.avatar,
+        user.avatarUrl,
+        user.imageUrl,
+        user.image
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const value = String(candidate).trim();
+        if (!value) continue;
+        if (value.startsWith('data:image/')) return value;
+        if (/^https?:\/\//i.test(value)) return value;
+        if (/^gs:\/\//i.test(value)) return value;
+    }
+
+    return getUserAvatarFallback(user);
+}
+
+function getUserAvatarFallback(user = {}) {
+    const name = user.name || 'User';
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`;
+}
+
+window.handleUserImageError = function(imgEl, userName) {
+    if (imgEl.dataset.fallbackApplied === 'true') return;
+    imgEl.dataset.fallbackApplied = 'true';
+    imgEl.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(userName || 'User')}&background=random&color=fff`;
+}
+
+function updateUnverifiedUserIndicator() {
+    const bellDot = document.querySelector('.absolute.top-2.right-2.bg-red-500');
+    if (!bellDot) return;
+
+    const hasUnverifiedUsers = globalUsers.some(user => !normalizeUserVerificationState(user));
+    if (hasUnverifiedUsers) bellDot.classList.remove('hidden');
+    else bellDot.classList.add('hidden');
+}
+
+function normalizeWorkflowStatus(rawStatus, source = '') {
+    const status = String(rawStatus || '').trim().toLowerCase();
+    if (!status) return source === 'MobilePending' ? 'Pending' : 'Unknown';
+    if (['pending', 'for approval'].includes(status)) return 'Pending';
+    if (['approved', 'verified', 'active'].includes(status)) return 'Approved';
+    if (['rejected', 'declined'].includes(status)) return 'Rejected';
+    if (['in stock', 'in-stock'].includes(status)) return 'Approved';
+    if (['out of stock', 'out-of-stock'].includes(status)) return 'Approved';
+    return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function normalizeProductVerificationState(product = {}) {
+    const verifiedValue = String(product.verified ?? '').trim().toLowerCase();
+    const workflowStatus = String(product.WorkflowStatus || product.Status || product.status || '').trim().toLowerCase();
+    if (product.verified === true) return true;
+    if (verifiedValue === 'verified') return true;
+    if (product.source === 'ApprovedMarketplace') return true;
+    if (product.source === 'VendorPortal' && workflowStatus === 'approved') return true;
+    return false;
+}
+
+function isOutOfStockProduct(product = {}) {
+    return String(product.Availability || normalizeAvailability(product, product.WorkflowStatus || product.Status || '') || '').trim().toLowerCase() === 'out of stock';
+}
+
+function getInventoryProducts() {
+    if (currentInventoryTab === 'outofstock') {
+        return globalProducts.filter(product => normalizeProductVerificationState(product) && isOutOfStockProduct(product));
+    }
+
+    if (currentInventoryTab === 'allrecords') {
+        return [...globalProducts];
+    }
+
+    return globalProducts.filter(product => normalizeProductVerificationState(product) && !isOutOfStockProduct(product));
+}
+
+function normalizeAvailability(product, workflowStatus = '') {
+    const rawAvailability = product.Availability ?? product.availability;
+    const availability = String(rawAvailability || '').trim().toLowerCase();
+    const status = String(product.Status ?? product.status ?? '').trim().toLowerCase();
+
+    if (availability === 'in stock' || availability === 'in-stock') return 'In Stock';
+    if (availability === 'out of stock' || availability === 'out-of-stock') return 'Out of Stock';
+    if (availability === 'low stock' || availability === 'low-stock') return 'Low Stock';
+
+    if (status === 'in stock' || status === 'in-stock') return 'In Stock';
+    if (status === 'out of stock' || status === 'out-of-stock') return 'Out of Stock';
+    if (status === 'low stock' || status === 'low-stock') return 'Low Stock';
+
+    if (workflowStatus === 'Rejected') return 'Out of Stock';
+    return 'In Stock';
+}
+
+function isApprovedProduct(product) {
+    return product.WorkflowStatus === 'Approved';
+}
+
+function getAvailabilityBadge(status) {
+    const s = String(status || '').toLowerCase();
+    const base = "px-2 py-1 rounded text-xs font-bold";
+    if (s === 'in stock') return `${base} bg-green-100 text-green-600`;
+    if (s === 'low stock') return `${base} bg-orange-100 text-orange-600`;
+    if (s === 'out of stock') return `${base} bg-red-100 text-red-600`;
+    return `${base} bg-gray-100 text-gray-500`;
+}
+
+function buildApprovedProductCopy(product, itemId) {
+    const productImages = Array.isArray(product.imageUrls) && product.imageUrls.length
+        ? product.imageUrls
+        : (Array.isArray(product.photoURLs) && product.photoURLs.length ? product.photoURLs : [product.Image || product.imageUrl || product.photoURL].filter(Boolean));
+
+    return {
+        ...product,
+        id: itemId,
+        productId: product.productId || itemId,
+        Product: getProductName(product),
+        name: getProductName(product),
+        Price: getProductPrice(product),
+        price: getProductPrice(product),
+        Category: getProductCategory(product),
+        category: getProductCategory(product),
+        DepartmentTag: product.DepartmentTag || product.departmentTag || '',
+        departmentTag: product.departmentTag || product.DepartmentTag || '',
+        Recipient: getProductRecipient(product),
+        displayVendor: product.displayVendor || getProductRecipient(product),
+        recipientName: product.recipientName || getProductRecipient(product),
+        Description: product.Description || '',
+        description: product.Description || '',
+        Condition: product.Condition || product.condition || '',
+        condition: product.Condition || product.condition || '',
+        Image: productImages[0] || '',
+        imageUrl: productImages[0] || '',
+        photoURL: productImages[0] || '',
+        Images: productImages,
+        imageUrls: productImages,
+        photoURLs: productImages,
+        itemType: product.itemType || 'Physical Item',
+        fulfillmentType: product.fulfillmentType || 'Campus Pick-up',
+        approvalStatus: product.approvalStatus || 'Approved',
+        Status: 'Approved',
+        status: 'approved',
+        WorkflowStatus: 'Approved',
+        Availability: 'In Stock',
+        availability: 'in-stock',
+        Stock_count: Number(product.Stock ?? product.Stock_count ?? 0) || 0,
+        stock: Number(product.stock ?? product.Stock ?? product.Stock_count ?? 0) || 0,
+        SizeStocks: product.SizeStocks || product.sizeStocks || null,
+        sizeStocks: product.sizeStocks || product.SizeStocks || null,
+        sourcePath: product.sourcePath || `products_approved/${itemId}`,
+        verified: true,
+        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+}
+
+function getMobileSellerUid(product = {}) {
+    return product.sellerUid || product.sellerId || product.uid || product.userId || '';
+}
+
+function getMobileProductId(docSnap, product = {}) {
+    return product.productId || product.id || docSnap.id;
+}
+
+function getMobileSellerProductPath(sellerUid, productId) {
+    return `seller_products/${sellerUid}/products/${productId}`;
+}
+
+function buildMobileWorkflowUpdate(status, availability) {
+    const capitalizedStatus = String(status || '').charAt(0).toUpperCase() + String(status || '').slice(1);
+    const update = {
+        Status: capitalizedStatus,
+        status: String(status || '').toLowerCase(),
+        WorkflowStatus: capitalizedStatus,
+        Availability: availability
+    };
+
+    if (availability) {
+        update.availability = availability.toLowerCase().replace(/\s+/g, '-');
+    }
+
+    return update;
+}
+
+function getProductSourceLabel(product) {
+    if (product.source === 'MobilePending') return 'products_pending';
+    if (product.source === 'ApprovedMarketplace') return 'products_approved';
+    if (product.source === 'VendorPortal') return 'vendor listings';
+    return product.source || 'unknown';
+}
+
+function isPendingProduct(product) {
+    return product.WorkflowStatus === 'Pending';
+}
+
+function escapeForAttribute(value) {
+    return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// 3. The Master Listener Function (ONE declaration only)
 function initDataListeners() {
+    if (hasInitializedDataListeners) return;
+    hasInitializedDataListeners = true;
+
     triggerSkeleton('finance-orders-table', 4, 5);
     triggerSkeleton('tbody-all-items', 8, 7);
     triggerSkeleton('tbody-customers', 5, 5);
     triggerSkeleton('activity-list', 3, 1);
 
-    // Products
-    db.collection('products').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalProducts = [];
-        snap.forEach(d => globalProducts.push({ id: d.id, ...d.data() }));
-        renderProducts();
-        renderSchoolListings();
-        renderPendingApprovals();
+    // PATH A: Approved Marketplace Products
+    db.collection('products_approved').onSnapshot(snap => {
+        productsApproved = snap.docs.map(doc => normalizeProduct(doc, 'ApprovedMarketplace'));
+        mergeAndRefreshProducts();
+    });
+
+    // PATH B: Vendor Portal Products
+    db.collectionGroup('listings').onSnapshot(snap => {
+        productsVendors = snap.docs.map(doc => normalizeProduct(doc, 'VendorPortal'));
+        mergeAndRefreshProducts();
+    }, err => {
+        console.error("🔥 Path B Failed. Check for an Index link below:", err);
+    });
+
+    // PATH C: Mobile App Pending Products
+    db.collection('products_pending').onSnapshot(snap => {
+        productsPending = snap.docs.map(doc => normalizeProduct({
+            id: doc.id,
+            ref: doc.ref,
+            data: () => ({ Status: 'Pending', ...doc.data() })
+        }, 'MobilePending'));
+        mergeAndRefreshProducts();
+    });
+
+    // Users Listener
+    db.collection('users').onSnapshot(snap => {
+        globalUsers = snap.docs
+            .map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() }))
+            .sort((a, b) => {
+                const aTime = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+                const bTime = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+                return bTime - aTime;
+            });
+        renderUsers(); 
+        updateUnverifiedUserIndicator();
         updateDashboardStats(); 
     });
 
-    // Users
-    db.collection('users').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalUsers = [];
-        snap.forEach(d => globalUsers.push({ id: d.id, ...d.data() }));
-        renderUsers(); updateDashboardStats(); 
-    });
-
-    // Financials & Logs
+    // Financials
     db.collection('financials').onSnapshot(() => updateDashboardStats());
     renderDashboardActivity();
     
     // Support Tickets
     db.collection('tickets').orderBy('createdAt', 'desc').onSnapshot(snap => {
-        globalTickets = [];
-        snap.forEach(d => globalTickets.push({ id: d.id, ...d.data() }));
-        const inboxView = document.getElementById('view-inbox');
-        if (inboxView && !inboxView.classList.contains('hidden')) renderInbox();
+        globalTickets = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (!document.getElementById('view-inbox').classList.contains('hidden')) renderInbox();
+        refreshActiveInboxItem();
     });
 
-    // Notification Bell (Unverified Users)
-    db.collection('users').where('verified', '==', false).onSnapshot(snap => {
-        const bellDot = document.querySelector('.absolute.top-2.right-2.bg-red-500');
-        if (bellDot) snap.size > 0 ? bellDot.classList.remove('hidden') : bellDot.classList.add('hidden');
+    // Product Reports from the mobile app moderation flow
+    db.collection('product_reports').orderBy('createdAt', 'desc').onSnapshot(snap => {
+        globalReports = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (!document.getElementById('view-inbox').classList.contains('hidden')) renderInbox();
+        refreshActiveInboxItem();
     });
-
-    db.collection('users').onSnapshot(snap => {
-    globalUsers = [];
-    snap.forEach(doc => {
-        // We spread the data and add the ID as both 'id' and 'uid' 
-        // to make sure your .find() logic never fails
-        globalUsers.push({ id: doc.id, uid: doc.id, ...doc.data() });
-    });
-    renderUsers(); // Refresh the table whenever a promotion happens!
-});
 }
+
+
 
 
 // ==========================================
@@ -265,7 +792,7 @@ function updateDashboardStats() {
             subText.className = isToday ? "text-xs text-gray-400 font-medium" : "text-xs text-[#852221] dark:text-red-400 font-bold";
         }
 
-        if (document.getElementById('dash-active-products')) document.getElementById('dash-active-products').innerText = globalProducts.filter(p => (p.Status || '').toLowerCase() === 'in stock').length;
+        if (document.getElementById('dash-active-products')) document.getElementById('dash-active-products').innerText = globalProducts.filter(p => isApprovedProduct(p) && p.Availability === 'In Stock').length;
         if (document.getElementById('dash-total-users')) document.getElementById('dash-total-users').innerText = globalUsers.length;
 
         if (tableBody) {
@@ -289,26 +816,29 @@ function updateDashboardStats() {
 function renderProducts() {
     const tDashboard = document.querySelector('#productsTable tbody');
     const tAllItems = document.getElementById('tbody-all-items');
+    const inventoryProducts = getInventoryProducts();
     
     if (tDashboard) tDashboard.innerHTML = ''; 
     if (tAllItems) tAllItems.innerHTML = '';
 
     globalProducts.forEach(p => {
-        const name = p.Product || p.name || 'Unnamed'; 
-        const img = p.Image || `https://ui-avatars.com/api/?name=${name}&background=eee`;
-        const price = p.Price || 0; 
-        const stock = p.Stock || 0; 
-        const status = p.Status || 'Unknown';
+        const name = getProductName(p);
+        const img = getProductImage(p);
+        const price = getProductPrice(p);
+        const stock = getProductStockDisplay(p);
+        const stockMetric = getProductStockMetric(p);
+        const status = p.WorkflowStatus || p.Status || 'Unknown';
+        const availability = p.Availability || 'In Stock';
 
         // --- 1. PREMIUM DASHBOARD VIEW (Inventory Monitor) ---
         if (tDashboard && globalProducts.indexOf(p) < 5) {
-            const stockPercent = Math.min((stock / 100) * 100, 100);
-            const barColor = stock < 10 ? 'bg-red-500' : 'bg-green-500';
+            const stockPercent = Math.min((stockMetric / 100) * 100, 100);
+            const barColor = stockMetric < 10 ? 'bg-red-500' : 'bg-green-500';
 
             tDashboard.innerHTML += `
             <tr onclick="viewProductDetails('${p.id}')" class="group hover:bg-slate-50 dark:hover:bg-white/5 transition-all cursor-pointer">
                 <td class="px-8 py-5 flex items-center gap-4">
-                    <img src="${img}" class="w-12 h-12 rounded-2xl object-cover grayscale group-hover:grayscale-0 transition-all duration-500 shadow-sm border border-gray-100 dark:border-dark-border">
+                    <img src="${img}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-12 h-12 rounded-2xl object-cover grayscale group-hover:grayscale-0 transition-all duration-500 shadow-sm border border-gray-100 dark:border-dark-border">
                     <div>
                         <p class="font-bold text-slate-700 dark:text-white leading-none mb-1">${name}</p>
                         <p class="text-[10px] text-slate-400 font-mono uppercase">ID: ${p.id.substring(0,6)}</p>
@@ -323,40 +853,95 @@ function renderProducts() {
                     </div>
                 </td>
                 <td class="px-8 py-5 text-right">
-                    <span class="${getStatusBadge(status)} badge-premium uppercase tracking-tighter shadow-sm">${status}</span>
+                    <div class="inline-flex flex-col items-end gap-1">
+                        <span class="${getStatusBadge(status)} badge-premium uppercase tracking-tighter shadow-sm">${status}</span>
+                        <span class="${getAvailabilityBadge(availability)} badge-premium uppercase tracking-tighter shadow-sm">${availability}</span>
+                    </div>
                 </td>
             </tr>`;
         }
 
         // --- 2. ALL ITEMS VIEW (Full Inventory Table) ---
-        if (tAllItems) {
+        if (tAllItems && false) {
             tAllItems.innerHTML += `
             <tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors text-sm cursor-pointer">
                 <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 flex items-center gap-3">
-                    <img src="${img}" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                    <img src="${img}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-10 h-10 rounded-lg object-cover shadow-sm">
                     <div>
                         <p class="font-bold text-gray-700 dark:text-gray-300">${name}</p>
                         <p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6).toUpperCase()}</p>
                     </div>
                 </td>
-                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Category || '--'}</td>
-                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${p.Recipient || '--'}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${getProductCategory(p)}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${getProductRecipient(p)}</td>
                 <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">₱${price.toLocaleString()}</td>
                 <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400 font-mono">${stock}</td>
                 <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-right">
-                    <span class="${getStatusBadge(status)}">${status}</span>
+                    <div class="inline-flex flex-col items-end gap-1">
+                        <span class="${getStatusBadge(status)}">${status}</span>
+                        <span class="${getAvailabilityBadge(availability)}">${availability}</span>
+                    </div>
                 </td>
                 <td class="px-6 py-4 text-right flex justify-end gap-2">
-                    <button onclick="event.stopPropagation(); editProduct('${p.id}')" class="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-all">
+                    <button onclick="event.stopPropagation(); editProduct('${escapeForAttribute(p.id)}')" class="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-all">
                         <i data-lucide="edit-3" class="w-4 h-4"></i>
                     </button>
-                    <button onclick="event.stopPropagation(); deleteItem('products', '${p.id}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all">
+                    <button onclick="event.stopPropagation(); deleteItem('${escapeForAttribute(p.path)}', '${escapeForAttribute(name)}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                     </button>
                 </td>
             </tr>`;
         }
     });
+
+    if (tAllItems) {
+        inventoryProducts.forEach(p => {
+            const name = getProductName(p);
+            const img = getProductImage(p);
+            const price = getProductPrice(p);
+            const stock = getProductStockDisplay(p);
+            const status = p.WorkflowStatus || p.Status || 'Unknown';
+            const availability = p.Availability || 'In Stock';
+
+            tAllItems.innerHTML += `
+            <tr class="table-row-hover group border-b border-gray-50 dark:border-dark-border transition-colors text-sm cursor-pointer">
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 flex items-center gap-3">
+                    <img src="${img}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                    <div>
+                        <p class="font-bold text-gray-700 dark:text-gray-300">${name}</p>
+                        <p class="text-xs text-gray-400 font-mono">${p.id.substring(0,6).toUpperCase()}</p>
+                    </div>
+                </td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${getProductCategory(p)}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400">${getProductRecipient(p)}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 font-bold text-gray-700 dark:text-gray-300">${formatPeso(price)}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-gray-600 dark:text-gray-400 font-mono">${stock}</td>
+                <td onclick="viewProductDetails('${p.id}')" class="px-6 py-4 text-right">
+                    <div class="inline-flex flex-col items-end gap-1">
+                        <span class="${getStatusBadge(status)}">${status}</span>
+                        <span class="${getAvailabilityBadge(availability)}">${availability}</span>
+                    </div>
+                </td>
+                <td class="px-6 py-4 text-right flex justify-end gap-2">
+                    <button onclick="event.stopPropagation(); editProduct('${escapeForAttribute(p.id)}')" class="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-all">
+                        <i data-lucide="edit-3" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteItem('${escapeForAttribute(p.path)}', '${escapeForAttribute(name)}')" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </td>
+            </tr>`;
+        });
+    }
+
+    if (tAllItems && inventoryProducts.length === 0) {
+        const emptyState = currentInventoryTab === 'outofstock'
+            ? 'No verified out of stock items found.'
+            : currentInventoryTab === 'allrecords'
+                ? 'No products found.'
+                : 'No verified in-stock inventory found.';
+        tAllItems.innerHTML = `<tr><td colspan="7" class="py-10 text-center text-gray-400 italic">${emptyState}</td></tr>`;
+    }
 
     if(window.lucide) lucide.createIcons();
 }
@@ -369,36 +954,217 @@ function renderSchoolListings() {
     const officialDepts = ["Library", "Virtual Lab", "Computer Lab", "Supply Department"];
     const selected = filter ? filter.value : "All";
 
-    let data = globalProducts.filter(p => officialDepts.some(d => d.toLowerCase() === (p.Recipient || '').trim().toLowerCase()));
-    if (selected !== "All") data = data.filter(p => (p.Recipient || '').trim().toLowerCase() === selected.toLowerCase());
+    // UPDATED FILTER: It checks vendorName first, then falls back to Recipient
+    let data = globalProducts.filter(p => {
+        const deptValue = getProductRecipient(p).trim();
+        return officialDepts.some(dept => dept.toLowerCase() === deptValue.toLowerCase());
+    });
+
+    if (selected !== "All") {
+        data = data.filter(p => {
+            const deptValue = getProductRecipient(p).trim();
+            return deptValue.toLowerCase() === selected.toLowerCase();
+        });
+    }
 
     tbody.innerHTML = '';
-    if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-gray-400 italic">No official items currently allocated.</td></tr>`; return; }
+    if (data.length === 0) { 
+        tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-gray-400 italic">No official items found.</td></tr>`; 
+        return; 
+    }
 
-    data.sort((a, b) => (a.Recipient || '').localeCompare(b.Recipient || '')).forEach(p => {
-        let badge = 'bg-gray-100 text-gray-600'; const dLower = (p.Recipient || '').toLowerCase();
-        if(dLower === 'library') badge = 'bg-blue-50 text-blue-600';
-        if(dLower === 'virtual lab') badge = 'bg-purple-50 text-purple-600';
-        if(dLower === 'computer lab') badge = 'bg-indigo-50 text-indigo-600';
-        if(dLower === 'supply department') badge = 'bg-amber-50 text-amber-600';
+    data.sort((a, b) => getProductRecipient(a).localeCompare(getProductRecipient(b)))
+    .forEach(p => {
+        const name = getProductName(p);
+        const dept = getProductRecipient(p);
+        
+        let badge = 'bg-gray-100 text-gray-600'; 
+        const dLower = dept.toLowerCase();
+        if(dLower.includes('library')) badge = 'bg-blue-50 text-blue-600';
+        else if(dLower.includes('virtual')) badge = 'bg-purple-50 text-purple-600';
+        else if(dLower.includes('computer')) badge = 'bg-indigo-50 text-indigo-600';
+        else if(dLower.includes('supply')) badge = 'bg-amber-50 text-amber-600';
 
-        tbody.innerHTML += `<tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors"><td class="px-6 py-4"><span class="px-3 py-1 rounded-full text-xs font-bold ${badge}">${p.Recipient || '--'}</span></td><td class="px-6 py-4 font-bold flex items-center gap-3"><img src="${p.Image || `https://ui-avatars.com/api/?name=${p.Product || 'Item'}&background=eee`}" class="w-8 h-8 rounded object-cover shadow-sm">${p.Product || 'Unnamed Item'}</td><td class="px-6 py-4 text-gray-600">${p.Category || '--'}</td><td class="px-6 py-4 text-right font-mono text-gray-600">${p.Stock || 0}</td><td class="px-6 py-4 text-right"><span class="${getStatusBadge(p.Status || 'Unknown')}">${p.Status || 'Unknown'}</span></td></tr>`;
+        tbody.innerHTML += `
+        <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors border-b dark:border-dark-border">
+            <td class="px-6 py-4">
+                <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${badge}">${dept}</span>
+            </td>
+            <td class="px-6 py-4 font-bold flex items-center gap-3">
+                <img src="${getProductImage(p)}" onerror="handleProductImageError(this, '${escapeForAttribute(p.Product || p.name)}')" class="w-8 h-8 rounded shadow-sm object-cover">
+                <span class="text-gray-800 dark:text-gray-200">${name}</span>
+            </td>
+            <td class="px-6 py-4 text-gray-500 text-xs">${getProductCategory(p)}</td>
+            <td class="px-6 py-4 text-right font-mono font-bold text-slate-600 dark:text-slate-400">${getProductStockDisplay(p)}</td>
+            <td class="px-6 py-4 text-right">
+                <div class="inline-flex flex-col items-end gap-1">
+                    <span class="${getStatusBadge(p.WorkflowStatus)} uppercase text-[9px] font-black">${p.WorkflowStatus}</span>
+                    <span class="${getAvailabilityBadge(p.Availability)} uppercase text-[9px] font-black">${p.Availability}</span>
+                </div>
+            </td>
+        </tr>`;
     });
+}
+
+function renderPendingApprovalsLegacy() {
+    const tbody = document.getElementById('tbody-pending-approvals');
+    if (!tbody) return;
+
+    const pItems = globalProducts.filter(isPendingProduct);
+    tbody.innerHTML = '';
+
+    if (pItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-gray-400 italic">No pending items.</td></tr>`;
+        return;
+    }
+
+    pItems.forEach(p => {
+        const name = getProductName(p);
+        const vendor = getPendingSubmitter(p);
+        const category = getProductCategory(p);
+        const price = getProductPrice(p).toLocaleString();
+        const image = getProductImage(p);
+        const source = getProductSourceLabel(p);
+        const path = p.path || '--';
+        
+        tbody.innerHTML += `
+        <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors">
+            <td class="px-6 py-4 flex items-center gap-3">
+                <img src="${image}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                <div>
+                    <p class="font-bold text-gray-700 dark:text-white">${name}</p>
+                    <p class="text-[10px] text-gray-400 font-mono mt-1">${p.id.substring(0, 10).toUpperCase()}</p>
+                </div>
+            </td>
+            <td class="px-6 py-4 text-gray-600 font-medium">${vendor}</td>
+            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">${category}</td>
+            <td class="px-6 py-4 text-xs">₱${p.Price || 0}</td>
+            <td class="px-6 py-4 text-center">
+                <div class="flex justify-center gap-2">
+                    <button onclick="approveProduct('${escapeForAttribute(p.path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white rounded-lg text-xs font-bold transition-all">Approve</button>
+                    <button onclick="rejectProduct('${escapeForAttribute(p.path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-xs font-bold transition-all">Reject</button>
+                </div>
+            </td>
+        </tr>`;
+    });
+    if(window.lucide) lucide.createIcons();
+}
+
+function renderPendingApprovalsOld() {
+    const tbody = document.getElementById('tbody-pending-approvals');
+    if (!tbody) return;
+
+    const pItems = globalProducts.filter(isPendingProduct);
+    tbody.innerHTML = '';
+
+    if (pItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 italic">No pending items.</td></tr>`;
+        return;
+    }
+
+    pItems.forEach(p => {
+        const name = getProductName(p);
+        const vendor = getPendingSubmitter(p);
+        const category = getProductCategory(p);
+        const price = getProductPrice(p).toLocaleString();
+        const image = getProductImage(p);
+        const source = getProductSourceLabel(p);
+        const path = p.path || '--';
+        const workflowStatus = p.WorkflowStatus || p.Status || 'Pending';
+        const availability = p.Availability || 'In Stock';
+
+        tbody.innerHTML += `
+        <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors">
+            <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                    <img src="${image}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                    <div>
+                        <p class="font-bold text-gray-700 dark:text-white">${name}</p>
+                        <p class="text-[10px] text-gray-400 font-mono mt-1">${p.id.substring(0, 10).toUpperCase()}</p>
+                        <div class="mt-1 flex flex-wrap gap-2 text-[10px]">
+                            <span class="text-gray-400">Status:</span><span class="font-bold text-orange-600 dark:text-orange-400">${workflowStatus}</span>
+                            <span class="text-gray-400">Availability:</span><span class="font-bold text-green-600 dark:text-green-400">${availability}</span>
+                        </div>
+                    </div>
+                </div>
+            </td>
+            <td class="px-6 py-4">
+                <div class="font-medium text-gray-700 dark:text-gray-300">${vendor}</div>
+                <div class="text-[10px] text-gray-400 mt-1">${p.sellerEmail || p.recipientName || ''}</div>
+            </td>
+            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">${category}</td>
+            <td class="px-6 py-4">
+                <div class="inline-flex flex-col gap-1 max-w-[320px]">
+                    <span class="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 w-fit">${source}</span>
+                    <span class="text-[10px] text-gray-400 font-mono break-all">${path}</span>
+                </div>
+            </td>
+            <td class="px-6 py-4 text-right text-xs font-bold whitespace-nowrap">${formatPeso(price)}</td>
+            <td class="px-6 py-4 text-center">
+                <div class="flex justify-center gap-2">
+                    <button onclick="approveProduct('${escapeForAttribute(path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white rounded-lg text-xs font-bold transition-all">Approve</button>
+                    <button onclick="rejectProduct('${escapeForAttribute(path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-xs font-bold transition-all">Reject</button>
+                </div>
+            </td>
+        </tr>`;
+    });
+
+    if(window.lucide) lucide.createIcons();
 }
 
 function renderPendingApprovals() {
     const tbody = document.getElementById('tbody-pending-approvals');
     if (!tbody) return;
 
-    const pItems = globalProducts.filter(p => (p.Status || '').toLowerCase() === 'pending');
+    const pItems = globalProducts.filter(isPendingProduct);
     tbody.innerHTML = '';
 
-    if (pItems.length === 0) { tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-12 text-center text-gray-400 italic"><i data-lucide="check-circle" class="w-8 h-8 mx-auto mb-2 opacity-50 text-green-500"></i> No pending items to review.</td></tr>`; if(window.lucide) lucide.createIcons(); return; }
+    if (pItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 italic">No pending items.</td></tr>`;
+        return;
+    }
 
     pItems.forEach(p => {
-        const name = p.Product || p.name || 'Unnamed Item';
-        tbody.innerHTML += `<tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors"><td class="px-6 py-4 flex items-center gap-3"><img src="${p.Image || `https://ui-avatars.com/api/?name=${name}&background=eee`}" class="w-10 h-10 rounded-lg object-cover shadow-sm"><div><p class="font-bold text-gray-700">${name}</p><p class="text-xs text-orange-500 font-bold flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span> Needs Review</p></div></td><td class="px-6 py-4 text-gray-600 font-medium">${p.Recipient || 'Mobile User'}</td><td class="px-6 py-4"><span class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-500">${p.Category || '--'}</span></td><td class="px-6 py-4 font-bold text-gray-700 text-right">₱${p.Price || 0}</td><td class="px-6 py-4 text-center"><div class="flex justify-center gap-2"><button onclick="approveProduct('${p.id}', '${name}')" class="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg text-xs font-bold border border-green-200">Approve</button><button onclick="rejectProduct('${p.id}', '${name}')" class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold border border-red-200">Reject</button></div></td></tr>`;
+        const name = getProductName(p);
+        const vendor = getPendingSubmitter(p);
+        const category = getProductCategory(p);
+        const price = getProductPrice(p).toLocaleString();
+        const image = getProductImage(p);
+        const source = getProductSourceLabel(p);
+        const path = p.path || '--';
+
+        tbody.innerHTML += `
+        <tr class="hover:bg-gray-50 dark:hover:bg-dark-border transition-colors">
+            <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                <img src="${image}" onerror="handleProductImageError(this, '${escapeForAttribute(name)}')" class="w-10 h-10 rounded-lg object-cover shadow-sm">
+                    <div>
+                        <p class="font-bold text-gray-700 dark:text-white">${name}</p>
+                        <p class="text-[10px] text-gray-400 font-mono mt-1">${p.id.substring(0, 10).toUpperCase()}</p>
+                    </div>
+                </div>
+            </td>
+            <td class="px-6 py-4">
+                <div class="font-medium text-gray-700 dark:text-gray-300">${vendor}</div>
+                <div class="text-[10px] text-gray-400 mt-1">${p.sellerEmail || p.recipientName || ''}</div>
+            </td>
+            <td class="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">${category}</td>
+            <td class="px-6 py-4">
+                <div class="inline-flex flex-col gap-1 max-w-[320px]">
+                    <span class="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 w-fit">${source}</span>
+                    <span class="text-[10px] text-gray-400 font-mono break-all">${path}</span>
+                </div>
+            </td>
+            <td class="px-6 py-4 text-right text-xs font-bold whitespace-nowrap">${'\u20B1'}${price}</td>
+            <td class="px-6 py-4 text-center">
+                <div class="flex justify-center gap-2">
+                    <button onclick="approveProduct('${escapeForAttribute(path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white rounded-lg text-xs font-bold transition-all">Approve</button>
+                    <button onclick="rejectProduct('${escapeForAttribute(path)}', '${escapeForAttribute(name)}')" class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-xs font-bold transition-all">Reject</button>
+                </div>
+            </td>
+        </tr>`;
     });
+
     if(window.lucide) lucide.createIcons();
 }
 
@@ -418,10 +1184,11 @@ function renderUsers() {
 
     globalUsers.forEach(u => {
         const name = u.name || 'Unknown'; 
-        const isVerified = u.verified === true || u.status === 'Active'; 
+        const isVerified = normalizeUserVerificationState(u);
         const userId = u.id || u.uid; 
-        const currentType = (u.userType || u.type || 'Customer').toUpperCase();
+        const currentType = getUserTypeLabel(u).toUpperCase();
         const currentRole = (u.role || 'User').toUpperCase();
+        const avatar = getUserAvatar(u);
 
         // 1. Logic for Promotion Button
         let promoBtn = "";
@@ -443,7 +1210,7 @@ function renderUsers() {
     const row = `
     <tr class="border-b border-gray-50 dark:border-dark-border table-row-hover transition-colors">
         <td class="px-6 py-4 flex items-center gap-3">
-            <img src="https://ui-avatars.com/api/?name=${name}&background=random&color=fff" class="w-8 h-8 rounded-full shadow-sm">
+            <img src="${avatar}" onerror="handleUserImageError(this, '${escapeForAttribute(name)}')" class="w-8 h-8 rounded-full shadow-sm object-cover">
             <div>
                 <p class="font-bold text-sm text-gray-700 dark:text-gray-300 leading-none mb-1">${name}</p>
                 <p class="text-[10px] text-gray-400 font-mono">${u.email || ''}</p>
@@ -466,7 +1233,7 @@ function renderUsers() {
                 
                 ${promoBtn}
 
-                <button onclick="deleteItem('users', '${userId}')" class="text-red-400 hover:text-red-600 p-1.5 transition-colors">
+                <button onclick="deleteItem('users/${userId}', '${name}')" class="text-red-400 hover:text-red-600 p-1.5 transition-colors">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                 </button>
             </div>
@@ -476,7 +1243,7 @@ function renderUsers() {
     // 3. Sorting into Tabs (Simplified Logic)
     if (!isVerified) { 
         if(tUnv) tUnv.innerHTML += row; 
-    } else if (currentType === 'Seller' || currentType === 'Staff') { 
+    } else if (currentType === 'SELLER' || currentType === 'STAFF') { 
         if(tSel) tSel.innerHTML += row; 
     } else { 
         if(tCus) tCus.innerHTML += row; 
@@ -527,10 +1294,273 @@ function renderDashboardActivity() {
 
 function getStatusBadge(status) {
     const s = (status || '').toLowerCase(); const base = "px-2 py-1 rounded text-xs font-bold";
-    if (['in stock', 'active', 'verified'].includes(s)) return `${base} bg-green-100 text-green-600`;
+    if (['approved', 'in stock', 'active', 'verified'].includes(s)) return `${base} bg-green-100 text-green-600`;
     if (['out of stock', 'rejected', 'suspended'].includes(s)) return `${base} bg-red-100 text-red-600`;
     if (['low stock', 'pending'].includes(s)) return `${base} bg-orange-100 text-orange-600`;
     return `${base} bg-gray-100 text-gray-500`;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeInboxStatus(status, fallback = 'open') {
+    const normalized = String(status || fallback).trim().toLowerCase();
+    if (!normalized) return fallback;
+    return normalized;
+}
+
+function formatInboxStatus(status) {
+    const normalized = normalizeInboxStatus(status);
+    return normalized.split(/[_\s-]+/).filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function getInboxStatusClass(status) {
+    const normalized = normalizeInboxStatus(status);
+    const base = 'px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider';
+    if (['resolved', 'closed'].includes(normalized)) return `${base} bg-green-100 text-green-600`;
+    if (['dismissed', 'rejected'].includes(normalized)) return `${base} bg-red-100 text-red-600`;
+    if (['reviewing', 'pending'].includes(normalized)) return `${base} bg-amber-100 text-amber-700`;
+    return `${base} bg-orange-100 text-orange-600`;
+}
+
+function getInboxListBadge(status) {
+    const normalized = normalizeInboxStatus(status);
+    if (['resolved', 'closed'].includes(normalized)) return { icon: 'check-circle', className: 'bg-green-100 text-green-600' };
+    if (['dismissed', 'rejected'].includes(normalized)) return { icon: 'x-circle', className: 'bg-red-100 text-red-600' };
+    if (['reviewing', 'pending'].includes(normalized)) return { icon: 'shield-alert', className: 'bg-amber-100 text-amber-700' };
+    return { icon: 'alert-circle', className: 'bg-orange-100 text-orange-600' };
+}
+
+function getTimestampMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.seconds === 'number') return value.seconds * 1000;
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatInboxListDate(value) {
+    if (value && typeof value.toDate === 'function') return value.toDate().toLocaleDateString('en-GB');
+    const parsed = value ? new Date(value) : null;
+    return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString('en-GB') : 'Just now';
+}
+
+function formatInboxDateTime(value) {
+    if (value && typeof value.toDate === 'function') return value.toDate().toLocaleString();
+    const parsed = value ? new Date(value) : null;
+    return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : 'Just now';
+}
+
+function getInboxItems() {
+    const ticketItems = globalTickets.map(ticket => ({
+        ...ticket,
+        inboxType: 'ticket',
+        inboxTitle: ticket.subject || 'Support Request',
+        inboxPreview: ticket.message || '...',
+        inboxSender: ticket.senderName || 'User',
+        inboxStatus: ticket.status || 'Open',
+        inboxTimestamp: ticket.createdAt
+    }));
+
+    const reportItems = globalReports.map(report => ({
+        ...report,
+        inboxType: 'report',
+        inboxTitle: report.subject || `Product Report: ${report.productName || report.productId || 'Unnamed Product'}`,
+        inboxPreview: report.description || report.reason || 'No report description provided.',
+        inboxSender: report.reporterName || report.senderName || 'Reporter',
+        inboxStatus: report.status || 'pending',
+        inboxTimestamp: report.updatedAt || report.createdAt
+    }));
+
+    return [...reportItems, ...ticketItems].sort((a, b) => getTimestampMillis(b.inboxTimestamp) - getTimestampMillis(a.inboxTimestamp));
+}
+
+function getInboxItemById(type, id) {
+    if (type === 'report') return globalReports.find(item => item.id === id) || null;
+    return globalTickets.find(item => item.id === id) || null;
+}
+
+function getActiveInboxSelection() {
+    return {
+        id: document.getElementById('active-ticket-id')?.value || '',
+        type: document.getElementById('active-ticket-type')?.value || 'ticket'
+    };
+}
+
+function refreshActiveInboxItem() {
+    const { id, type } = getActiveInboxSelection();
+    if (!id) return;
+    const item = getInboxItemById(type, id);
+    if (item && !document.getElementById('inbox-active-ticket')?.classList.contains('hidden')) {
+        window.viewTicket(id, type);
+    }
+}
+
+function renderInboxMessageBubble(label, content, alignment = 'left', tone = 'default') {
+    const isRight = alignment === 'right';
+    const bubbleClass = tone === 'admin'
+        ? 'bg-[#852221] text-white'
+        : 'bg-white dark:bg-dark-card text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-dark-border';
+
+    return `
+        <div class="flex flex-col gap-1 mb-6 ${isRight ? 'items-end' : ''}">
+            <span class="text-xs text-gray-400 ${isRight ? 'mr-2' : 'ml-2'} font-medium">${escapeHtml(label)}</span>
+            <div class="${bubbleClass} p-5 rounded-2xl ${isRight ? 'rounded-tr-sm self-end' : 'rounded-tl-sm self-start'} shadow-sm inline-block max-w-[85%]">
+                <p class="text-sm whitespace-pre-wrap leading-relaxed">${escapeHtml(content || '...')}</p>
+            </div>
+        </div>
+    `;
+}
+
+function clearInboxReplyBox(type = 'ticket') {
+    const replyBox = document.getElementById('ticket-reply-text');
+    if (!replyBox) return;
+    replyBox.value = '';
+    replyBox.placeholder = type === 'report' ? 'Add internal review notes...' : 'Type reply...';
+}
+
+function getReportReplyEntries(report = {}) {
+    const replies = Array.isArray(report.reportReplies) ? report.reportReplies.filter(Boolean) : [];
+
+    if (replies.length > 0) {
+        return replies.slice().sort((a, b) => {
+            const aTime = Number(a?.createdAtMs || 0);
+            const bTime = Number(b?.createdAtMs || 0);
+            return aTime - bTime;
+        });
+    }
+
+    if (report.reviewNotes) {
+        return [{
+            text: report.reviewNotes,
+            authorName: 'Admin Review',
+            createdAtMs: getTimestampMillis(report.updatedAt || report.createdAt)
+        }];
+    }
+
+    return [];
+}
+
+function buildReportReplyPayload(replyText) {
+    const user = auth.currentUser;
+    return {
+        text: replyText,
+        authorId: user ? user.uid : '',
+        authorName: document.querySelector('.user-name')?.innerText || 'Admin',
+        createdAtMs: Date.now()
+    };
+}
+
+function buildReportMessageDoc(replyText) {
+    const user = auth.currentUser;
+    return {
+        text: replyText,
+        senderUid: user ? user.uid : '',
+        senderName: document.querySelector('.user-name')?.innerText || 'Admin',
+        senderRole: 'admin',
+        imageUrl: '',
+        isInternal: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+}
+
+function resetActiveReportMessages() {
+    activeReportMessages = [];
+    activeReportMessagesReportId = '';
+    if (typeof unsubscribeActiveReportMessages === 'function') {
+        unsubscribeActiveReportMessages();
+    }
+    unsubscribeActiveReportMessages = null;
+}
+
+function getActiveReportMessageEntries(reportId) {
+    if (activeReportMessagesReportId !== reportId) return [];
+    return activeReportMessages.slice().sort((a, b) => getTimestampMillis(a.createdAt) - getTimestampMillis(b.createdAt));
+}
+
+function subscribeToReportMessages(reportId) {
+    if (!reportId) return;
+    if (activeReportMessagesReportId === reportId && typeof unsubscribeActiveReportMessages === 'function') return;
+
+    resetActiveReportMessages();
+    activeReportMessagesReportId = reportId;
+    unsubscribeActiveReportMessages = db.collection('product_reports').doc(reportId).collection('messages')
+        .orderBy('createdAt', 'asc')
+        .onSnapshot(snap => {
+            activeReportMessages = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const { id, type } = getActiveInboxSelection();
+            if (type === 'report' && id === reportId && !document.getElementById('inbox-active-ticket')?.classList.contains('hidden')) {
+                window.viewTicket(reportId, 'report');
+            }
+        }, error => {
+            console.error("Report messages listener error:", error);
+        });
+}
+
+function applyLocalReportUpdate(id, updates = {}, replyPayload = null) {
+    const reportIndex = globalReports.findIndex(x => x.id === id);
+    if (reportIndex === -1) return;
+
+    const currentReport = globalReports[reportIndex];
+    const nextReport = {
+        ...currentReport,
+        ...updates,
+        updatedAt: new Date()
+    };
+
+    if (replyPayload) {
+        nextReport.reviewNotes = replyPayload.text;
+        nextReport.reportReplies = [...getReportReplyEntries(currentReport), replyPayload];
+    }
+
+    globalReports[reportIndex] = nextReport;
+}
+
+function buildReportDocUpdate(status, actionTaken, replyText = '') {
+    const user = auth.currentUser;
+    const update = {
+        status,
+        actionTaken,
+        reviewedBy: user ? user.uid : '',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (replyText) {
+        const replyPayload = buildReportReplyPayload(replyText);
+        update.reviewNotes = replyText;
+        update.reportReplies = firebase.firestore.FieldValue.arrayUnion(replyPayload);
+        update.adminReply = replyText;
+        update.adminReplyAt = firebase.firestore.FieldValue.serverTimestamp();
+        update.adminReplyBy = user ? user.uid : '';
+        update.hasUnreadAdminReply = true;
+        update.lastMessage = replyText;
+        update.lastMessageAt = firebase.firestore.FieldValue.serverTimestamp();
+        update.lastMessageBy = 'admin';
+        update.hasUnreadReporterReply = false;
+        return { update, replyPayload };
+    }
+
+    return { update, replyPayload: null };
+}
+
+async function persistReportModerationUpdate(id, status, actionTaken, replyText = '', logLabel = 'Updated Product Report') {
+    const { update, replyPayload } = buildReportDocUpdate(status, actionTaken, replyText);
+    applyLocalReportUpdate(id, update, replyPayload);
+    await db.collection('product_reports').doc(id).set(update, { merge: true });
+    if (replyText) {
+        const messageDoc = buildReportMessageDoc(replyText);
+        await db.collection('product_reports').doc(id).collection('messages').add(messageDoc);
+    }
+    await logAction(logLabel, `Report ID: ${id.substring(0,6)}`, "Audit");
+    clearInboxReplyBox('report');
+    window.viewTicket(id, 'report');
+    renderInbox();
 }
 
 
@@ -540,30 +1570,51 @@ function getStatusBadge(status) {
 function renderInbox() {
     const listContainer = document.getElementById('inbox-list');
     if (!listContainer) return;
+    const searchTerm = (document.getElementById('ticketSearch')?.value || '').trim().toLowerCase();
+    const items = getInboxItems().filter(item => {
+        if (!searchTerm) return true;
+        return [
+            item.inboxTitle,
+            item.inboxPreview,
+            item.inboxSender,
+            item.reason,
+            item.productName,
+            item.productId,
+            item.sourcePath,
+            item.senderEmail,
+            item.reporterEmail
+        ].some(value => String(value || '').toLowerCase().includes(searchTerm));
+    });
 
-    if (globalTickets.length === 0) {
-        listContainer.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center"><i data-lucide="check-circle" class="w-8 h-8 mb-2 opacity-30 text-green-500"></i><span class="text-sm">Inbox is empty.</span></div>`;
+    if (items.length === 0) {
+        const emptyMessage = searchTerm ? 'No inbox items match your search.' : 'Inbox is empty.';
+        listContainer.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center"><i data-lucide="check-circle" class="w-8 h-8 mb-2 opacity-30 text-green-500"></i><span class="text-sm">${escapeHtml(emptyMessage)}</span></div>`;
         if(window.lucide) lucide.createIcons();
         return;
     }
 
     let html = '';
-    globalTickets.forEach(t => {
-        const isResolved = t.status === 'Resolved';
-        const badgeColor = isResolved ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600';
-        const icon = isResolved ? 'check-circle' : 'alert-circle';
-        const dateStr = t.createdAt && t.createdAt.toDate ? t.createdAt.toDate().toLocaleDateString('en-GB') : 'Just now';
+    items.forEach(item => {
+        const badge = getInboxListBadge(item.inboxStatus);
+        const dateStr = formatInboxListDate(item.inboxTimestamp);
+        const typeLabel = item.inboxType === 'report' ? 'Report' : 'Ticket';
+        const typeBadgeClass = item.inboxType === 'report'
+            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300';
 
         html += `
-        <div onclick="viewTicket('${t.id}')" class="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-dark-border transition-colors border-b border-gray-50 dark:border-dark-border group">
+        <div onclick="viewTicket('${escapeForAttribute(item.id)}', '${item.inboxType}')" class="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-dark-border transition-colors border-b border-gray-50 dark:border-dark-border group">
             <div class="flex justify-between items-start mb-1">
-                <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 group-hover:text-[#852221] transition-colors truncate pr-2">${t.subject || 'Support Request'}</h4>
-                <span class="text-[10px] text-gray-400 whitespace-nowrap">${dateStr}</span>
+                <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 group-hover:text-[#852221] transition-colors truncate pr-2">${escapeHtml(item.inboxTitle)}</h4>
+                <span class="text-[10px] text-gray-400 whitespace-nowrap">${escapeHtml(dateStr)}</span>
             </div>
-            <p class="text-xs text-gray-500 truncate mb-2">${t.message || '...'}</p>
+            <p class="text-xs text-gray-500 truncate mb-2">${escapeHtml(item.inboxPreview)}</p>
             <div class="flex justify-between items-center">
-                <span class="text-xs font-medium text-gray-600 dark:text-gray-400">${t.senderName || 'User'}</span>
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 ${badgeColor}"><i data-lucide="${icon}" class="w-3 h-3"></i> ${t.status || 'Open'}</span>
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-xs font-medium text-gray-600 dark:text-gray-400 truncate">${escapeHtml(item.inboxSender)}</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${typeBadgeClass}">${typeLabel}</span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 ${badge.className}"><i data-lucide="${badge.icon}" class="w-3 h-3"></i> ${escapeHtml(formatInboxStatus(item.inboxStatus))}</span>
             </div>
         </div>`;
     });
@@ -572,75 +1623,161 @@ function renderInbox() {
     if(window.lucide) lucide.createIcons();
 }
 
-window.viewTicket = function(id) {
-    const t = globalTickets.find(x => x.id === id);
-    if (!t) return;
+window.viewTicket = function(id, type = 'ticket') {
+    const item = getInboxItemById(type, id);
+    if (!item) return;
+
+    if (type === 'report') subscribeToReportMessages(id);
+    else if (activeReportMessagesReportId) resetActiveReportMessages();
 
     document.getElementById('active-ticket-id').value = id;
-    document.getElementById('ticket-detail-id').innerText = `#TCK-${id.substring(0,6).toUpperCase()}`;
-    document.getElementById('ticket-detail-subject').innerText = t.subject || 'Support Request';
-    document.getElementById('ticket-detail-sender').innerText = t.senderName || 'Unknown User';
-    
-    const dateStr = t.createdAt && t.createdAt.toDate ? t.createdAt.toDate().toLocaleString() : 'Just now';
-    document.getElementById('ticket-detail-date').innerText = dateStr;
+    document.getElementById('active-ticket-type').value = type;
+    document.getElementById('ticket-detail-id').innerText = `${type === 'report' ? '#RPT-' : '#TCK-'}${id.substring(0,6).toUpperCase()}`;
+    document.getElementById('ticket-detail-subject').innerText = type === 'report'
+        ? (item.subject || `Product Report: ${item.productName || item.productId || 'Unnamed Product'}`)
+        : (item.subject || 'Support Request');
+    document.getElementById('ticket-detail-sender').innerText = type === 'report'
+        ? (item.reporterName || item.senderName || 'Unknown Reporter')
+        : (item.senderName || 'Unknown User');
+    document.getElementById('ticket-detail-date').innerText = formatInboxDateTime(type === 'report' ? (item.updatedAt || item.createdAt) : item.createdAt);
 
     const statusBadge = document.getElementById('ticket-detail-status');
-    statusBadge.innerText = t.status || 'Open';
-    statusBadge.className = t.status === 'Resolved' ? 'px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-600' : 'px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-600';
+    statusBadge.innerText = formatInboxStatus(type === 'report' ? (item.status || 'pending') : (item.status || 'Open'));
+    statusBadge.className = getInboxStatusClass(type === 'report' ? item.status : item.status || 'Open');
 
     const conversationArea = document.getElementById('ticket-conversation');
     if (!conversationArea) return console.error("Missing ticket-conversation div!");
 
-    let convoHtml = `
-        <div class="flex flex-col gap-1 mb-6">
-            <span class="text-xs text-gray-400 ml-2 font-medium">${t.senderName || 'User'}</span>
-            <div class="bg-white dark:bg-dark-card p-5 rounded-2xl rounded-tl-sm shadow-sm border border-gray-100 dark:border-dark-border inline-block max-w-[85%] self-start">
-                <p class="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">${t.message || '...'}</p>
-            </div>
-        </div>
-    `;
+    const evidenceLink = document.getElementById('report-evidence-link');
+    const attachBtn = document.getElementById('ticket-attach-btn');
+    const reviewBtn = document.getElementById('report-review-btn');
+    const dismissBtn = document.getElementById('report-dismiss-btn');
+    const replyBtn = document.getElementById('ticket-reply-btn');
+    const resolveBtn = document.getElementById('ticket-resolve-btn');
+    const replyBox = document.getElementById('ticket-reply-text');
 
-    if (t.adminReply) {
-        convoHtml += `
-        <div class="flex flex-col gap-1 mb-6 items-end">
-            <span class="text-xs text-gray-400 mr-2 font-medium">Admin (You)</span>
-            <div class="bg-[#852221] p-5 rounded-2xl rounded-tr-sm shadow-sm text-white inline-block max-w-[85%] self-end">
-                <p class="text-sm whitespace-pre-wrap leading-relaxed">${t.adminReply}</p>
-            </div>
-        </div>
-        `;
+    let convoHtml = '';
+    if (type === 'report') {
+        const reportSummary = [
+            `Reason: ${item.reason || 'Not specified'}`,
+            `Product: ${item.productName || item.productId || 'Unknown product'}`,
+            `Seller UID: ${item.sellerUid || item.sellerId || 'Unknown seller'}`,
+            `Source: ${item.source || 'Unknown source'}`,
+            `Path: ${item.sourcePath || 'Missing sourcePath'}`
+        ].join('\n');
+        convoHtml += renderInboxMessageBubble('Moderation Context', reportSummary);
+
+        const reportMessages = getActiveReportMessageEntries(id);
+        if (reportMessages.length > 0) {
+            reportMessages.forEach(message => {
+                const isAdmin = String(message.senderRole || '').toLowerCase() === 'admin';
+                const label = isAdmin
+                    ? (message.senderName || 'Admin')
+                    : (message.senderName || item.reporterName || 'Reporter');
+                convoHtml += renderInboxMessageBubble(label, message.text || '...', isAdmin ? 'right' : 'left', isAdmin ? 'admin' : 'default');
+            });
+        } else {
+            convoHtml += renderInboxMessageBubble(item.reporterName || item.senderName || 'Reporter', item.description || item.reason || 'No report description provided.');
+            getReportReplyEntries(item).forEach(reply => {
+                convoHtml += renderInboxMessageBubble(reply.authorName || 'Admin Review', reply.text || '...', 'right', 'admin');
+            });
+        }
+
+        if (replyBox) {
+            replyBox.placeholder = 'Add internal review notes...';
+            replyBox.value = '';
+        }
+        if (evidenceLink) {
+            if (item.evidenceUrl) {
+                evidenceLink.href = item.evidenceUrl;
+                evidenceLink.classList.remove('hidden');
+                evidenceLink.classList.add('flex');
+            } else {
+                evidenceLink.href = '#';
+                evidenceLink.classList.add('hidden');
+                evidenceLink.classList.remove('flex');
+            }
+        }
+        if (attachBtn) attachBtn.classList.add('hidden');
+        if (reviewBtn) reviewBtn.classList.remove('hidden');
+        if (dismissBtn) dismissBtn.classList.remove('hidden');
+        if (replyBtn) {
+            replyBtn.innerText = 'Save Notes';
+            replyBtn.classList.remove('hidden');
+        }
+        if (resolveBtn) {
+            resolveBtn.innerText = 'Resolve';
+            resolveBtn.classList.remove('hidden');
+        }
+    } else {
+        convoHtml += renderInboxMessageBubble(item.senderName || 'User', item.message || '...');
+        if (item.adminReply) {
+            convoHtml += renderInboxMessageBubble('Admin (You)', item.adminReply, 'right', 'admin');
+        }
+
+        if (replyBox) {
+            replyBox.placeholder = 'Type reply...';
+            replyBox.value = '';
+        }
+        if (evidenceLink) {
+            evidenceLink.href = '#';
+            evidenceLink.classList.add('hidden');
+            evidenceLink.classList.remove('flex');
+        }
+        if (attachBtn) attachBtn.classList.remove('hidden');
+        if (reviewBtn) reviewBtn.classList.add('hidden');
+        if (dismissBtn) dismissBtn.classList.add('hidden');
+        if (replyBtn) {
+            replyBtn.innerText = 'Send Reply';
+            replyBtn.classList.remove('hidden');
+        }
+        if (resolveBtn) {
+            resolveBtn.innerText = 'Resolve';
+            resolveBtn.classList.remove('hidden');
+        }
     }
 
     conversationArea.innerHTML = convoHtml;
-
     document.getElementById('inbox-empty-state').classList.add('hidden');
     document.getElementById('inbox-active-ticket').classList.remove('hidden');
-    
+
+    if(window.lucide) lucide.createIcons();
     setTimeout(() => { conversationArea.scrollTop = conversationArea.scrollHeight; }, 50);
 };
 
 window.closeTicketView = function() {
     document.getElementById('inbox-active-ticket').classList.add('hidden');
     document.getElementById('inbox-empty-state').classList.remove('hidden');
+    document.getElementById('active-ticket-id').value = '';
+    document.getElementById('active-ticket-type').value = 'ticket';
+    resetActiveReportMessages();
 };
 
 window.replyToTicket = async function() {
     const id = document.getElementById('active-ticket-id').value;
+    const type = document.getElementById('active-ticket-type').value || 'ticket';
     const replyText = document.getElementById('ticket-reply-text').value.trim();
     
     if(!id) return;
     if(!replyText) return alert("Please type a reply first before sending.");
 
+    if (type === 'report') {
+        const currentReport = getInboxItemById('report', id) || {};
+        const nextStatus = normalizeInboxStatus(currentReport.status, 'pending') === 'pending'
+            ? 'reviewing'
+            : normalizeInboxStatus(currentReport.status, 'reviewing');
+        try {
+            await persistReportModerationUpdate(id, nextStatus, 'under_review', replyText, 'Updated Product Report');
+        } catch (e) {
+            console.error("Report Save Error:", e);
+            alert("Failed to save review notes. " + e.message);
+        }
+        return;
+    }
+
     const conversationArea = document.getElementById('ticket-conversation');
     if (conversationArea) {
-        conversationArea.innerHTML += `
-        <div class="flex flex-col gap-1 mb-6 items-end">
-            <span class="text-xs text-gray-400 mr-2 font-medium">Admin (You)</span>
-            <div class="bg-[#852221] p-5 rounded-2xl rounded-tr-sm shadow-sm text-white inline-block max-w-[85%] self-end">
-                <p class="text-sm whitespace-pre-wrap leading-relaxed">${replyText}</p>
-            </div>
-        </div>
-        `;
+        conversationArea.innerHTML += renderInboxMessageBubble('Admin (You)', replyText, 'right', 'admin');
         setTimeout(() => { conversationArea.scrollTop = conversationArea.scrollHeight; }, 10);
     }
 
@@ -650,7 +1787,7 @@ window.replyToTicket = async function() {
         statusBadge.className = 'px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-600';
     }
 
-    document.getElementById('ticket-reply-text').value = '';
+    clearInboxReplyBox('ticket');
 
     const ticketIndex = globalTickets.findIndex(x => x.id === id);
     if (ticketIndex > -1) {
@@ -673,11 +1810,21 @@ window.replyToTicket = async function() {
 
 window.resolveTicket = async function() {
     const id = document.getElementById('active-ticket-id').value;
+    const type = document.getElementById('active-ticket-type').value || 'ticket';
     if(!id) return;
+
+    if (type === 'report') {
+        const replyText = document.getElementById('ticket-reply-text').value.trim();
+        try {
+            await persistReportModerationUpdate(id, 'resolved', 'resolved_in_admin', replyText, 'Resolved Product Report');
+        } catch(e) { alert("Error: " + e.message); }
+        return;
+    }
     
     try {
         await db.collection('tickets').doc(id).update({ status: 'Resolved' });
         await logAction("Resolved Ticket", `Ticket ID: ${id.substring(0,6)}`);
+        clearInboxReplyBox('ticket');
         
         const statusBadge = document.getElementById('ticket-detail-status');
         if (statusBadge) {
@@ -687,36 +1834,40 @@ window.resolveTicket = async function() {
     } catch(e) { alert("Error: " + e.message); }
 };
 
-window.createDemoTicket = async function() {
-    const btn = document.querySelector('button[onclick="createDemoTicket()"]');
-    if(btn) { btn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Generating...`; btn.disabled = true; }
+window.markReportReviewing = async function() {
+    const id = document.getElementById('active-ticket-id').value;
+    const type = document.getElementById('active-ticket-type').value || 'ticket';
+    if (!id || type !== 'report') return;
 
+    const replyText = document.getElementById('ticket-reply-text').value.trim();
     try {
-        await db.collection('tickets').add({
-            subject: "Cannot process payment for Uniform",
-            message: "Hello Admin, I am trying to checkout my PE Uniform but the GCash QR code is not loading. Can you help me check if the system is down? My student ID is 2024-1234.",
-            senderName: "Mark Bautista",
-            senderEmail: "mark.b@student.scc.edu.ph",
-            status: "Open",
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-    } catch(e) { 
-        console.error(e); alert("Error generating ticket: " + e.message);
-    } finally {
-        if(btn) { btn.innerHTML = `<i data-lucide="plus-circle" class="w-4 h-4"></i> Generate Demo Ticket`; btn.disabled = false; }
-        if(window.lucide) lucide.createIcons();
+        await persistReportModerationUpdate(id, 'reviewing', 'under_review', replyText, 'Marked Product Report Reviewing');
+    } catch (e) {
+        alert("Error: " + e.message);
     }
 };
 
+window.dismissReport = async function() {
+    const id = document.getElementById('active-ticket-id').value;
+    const type = document.getElementById('active-ticket-type').value || 'ticket';
+    if (!id || type !== 'report') return;
+
+    const replyText = document.getElementById('ticket-reply-text').value.trim();
+    try {
+        await persistReportModerationUpdate(id, 'dismissed', 'dismissed_report', replyText, 'Dismissed Product Report');
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
 
 // ==========================================
 // 7. CRUD OPERATIONS (Save, Edit, Approvals)
 // ==========================================
 window.saveNewProduct = async function() {
-    const name = document.getElementById('inp_name').value; 
-    const price = document.getElementById('inp_price').value;
+    const name = document.getElementById('inp_name').value.trim(); 
+    const price = parseCurrencyInputValue(document.getElementById('inp_price').value);
     const stock = document.getElementById('inp_stock').value;
-    const file = document.getElementById('inp_file').files[0];
+    const files = collectProductImageFiles('inp_file');
     
     if (!name || !price) return alert("Please fill in the Product Name and Price");
 
@@ -724,19 +1875,69 @@ window.saveNewProduct = async function() {
     if (btn) { btn.textContent = "Uploading..."; btn.disabled = true; }
 
     try {
-        let imageUrl = file ? await uploadToCloudinary(file) : `https://ui-avatars.com/api/?name=${name}&background=eee`;
+        const selectedAvailability = document.getElementById('inp_status').value || 'In Stock';
+        const workflowStatus = selectedAvailability.toLowerCase() === 'pending' ? 'Pending' : 'Approved';
+        const category = document.getElementById('inp_category').value || 'General';
+        const usesSizeStocks = isSizedCategory(category);
+        const rawSizeStocks = readSizeStocks('inp_size_stock_section');
+        const sizeStocks = usesSizeStocks ? rawSizeStocks : null;
+        const imageUrls = await uploadProductImages(files, name);
+        const totalStock = stock !== ''
+            ? Number(stock)
+            : usesSizeStocks
+                ? Object.values(rawSizeStocks).reduce((sum, value) => sum + (Number(value) || 0), 0)
+                : 1;
+        const condition = getSelectedCondition('inp_condition');
+        const recipient = document.getElementById('inp_recipient').value.trim() || getCurrentAdminName();
+        const departmentTag = document.getElementById('inp_department_tag').value.trim();
+        const ownerUid = auth.currentUser ? auth.currentUser.uid : '';
+        if (!condition) throw new Error("Please select a condition.");
 
+        const productRef = db.collection(workflowStatus === 'Pending' ? 'products_pending' : 'products_approved').doc();
         const productData = {
-            Product: name, Price: Number(price), Stock: Number(stock) || 0,
-            Category: document.getElementById('inp_category').value || 'General', 
-            Status: document.getElementById('inp_status').value || 'In Stock',
-            Recipient: document.getElementById('inp_recipient').value || '', 
+            Product: name,
+            name,
+            Price: Number(price),
+            price: Number(price),
+            Stock: Number(totalStock) || 0,
+            Stock_count: Number(totalStock) || 0,
+            stockCount: Number(totalStock) || 0,
+            stock: Number(totalStock) || 0,
+            Category: category, 
+            category,
+            DepartmentTag: departmentTag,
+            departmentTag,
+            Status: workflowStatus,
+            WorkflowStatus: workflowStatus,
+            approvalStatus: workflowStatus,
+            Availability: selectedAvailability === 'Pending' ? 'In Stock' : selectedAvailability,
+            availability: (selectedAvailability === 'Pending' ? 'In Stock' : selectedAvailability).toLowerCase().replace(/\s+/g, '-'),
+            Recipient: recipient,
+            displayVendor: recipient,
+            recipientName: recipient,
             Description: document.getElementById('inp_desc').value || '',
-            Image: imageUrl, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            description: document.getElementById('inp_desc').value || '',
+            Condition: condition,
+            condition,
+            SizeStocks: sizeStocks,
+            sizeStocks,
+            sellerId: ownerUid,
+            ownerId: ownerUid,
+            uid: ownerUid,
+            itemType: 'Physical Item',
+            fulfillmentType: 'Campus Pick-up',
+            listingId: productRef.id,
+            sourcePath: `${workflowStatus === 'Pending' ? 'products_pending' : 'products_approved'}/${productRef.id}`,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            ...buildProductImageFields(imageUrls, name)
         };
 
-        const docRef = await db.collection('products').add(productData);
-        await logAction("Created Product", `Item: ${name} (ID: ${docRef.id.substring(0,6)})`);
+        productData.status = workflowStatus.toLowerCase();
+        productData.verified = workflowStatus === 'Approved';
+
+        await productRef.set(productData);
+        await logAction("Created Product", `Item: ${name} (ID: ${productRef.id.substring(0,6)})`);
         
         alert("Product Saved Successfully!");
         closeAndClearModal('addItemModal'); 
@@ -746,53 +1947,108 @@ window.saveNewProduct = async function() {
 };
 
 window.editProduct = function(id) {
-    const product = globalProducts.find(p => p.id === id); 
+    const product = getProductById(id); 
     if (!product) return;
     
     document.getElementById('edit_id').value = id;
-    document.getElementById('edit_name').value = product.Product || '';
-    document.getElementById('edit_price').value = product.Price || '';
-    document.getElementById('edit_stock').value = product.Stock || '';
-    document.getElementById('edit_category').value = product.Category || 'School Supplies';
-    document.getElementById('edit_status').value = product.Status || 'In Stock';
-    document.getElementById('edit_recipient').value = product.Recipient || '';
+    document.getElementById('edit_name').value = getProductName(product);
+    setCurrencyInputValue('edit_price', getProductPrice(product));
+    document.getElementById('edit_stock').value = product.Stock ?? product.Stock_count ?? '';
+    document.getElementById('edit_category').value = getProductCategory(product) || 'School Supplies';
+    document.getElementById('edit_department_tag').value = product.DepartmentTag || product.departmentTag || '';
+    document.getElementById('edit_status').value = product.WorkflowStatus === 'Pending' ? 'Pending' : (product.Availability || 'In Stock');
+    document.getElementById('edit_recipient').value = getProductRecipient(product) || getCurrentAdminName();
     document.getElementById('edit_desc').value = product.Description || '';
-
-    const mediaArea = document.querySelector('#editItemModal .media-upload-area');
-    if (mediaArea) {
-        if (product.Image) mediaArea.innerHTML = `<img src="${product.Image}" class="w-full h-32 object-contain rounded-lg">`;
-        else {
-            mediaArea.innerHTML = `<i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i><span class="text-xs text-gray-500">Click to Change Image</span>`;
-            if(window.lucide) lucide.createIcons();
-        }
-    }
+    setConditionSelection('edit_condition', product.Condition || product.condition || '');
+    populateSizeStocks('edit_size_stock_section', product.SizeStocks || product.sizeStocks || {});
+    toggleSizeStockSection('edit');
+    renderImagePreview('edit_preview', product.imageUrls || product.photoURLs || [getProductImage(product)]);
     openModal('editItemModal');
 };
 
 window.updateExistingProduct = async function() {
     const id = document.getElementById('edit_id').value;
-    const name = document.getElementById('edit_name').value; 
-    const price = document.getElementById('edit_price').value;
+    const name = document.getElementById('edit_name').value.trim(); 
+    const price = parseCurrencyInputValue(document.getElementById('edit_price').value);
     const stock = document.getElementById('edit_stock').value;
-    const file = document.getElementById('edit_file').files[0];
+    const files = collectProductImageFiles('edit_file');
+    const product = getProductById(id);
     
-    if (!id || !name || !price) return alert("Missing required fields.");
+    if (!id || !name || !price || !product) return alert("Missing required fields.");
 
     const btn = document.querySelector('#editItemModal button[onclick="updateExistingProduct()"]');
     if (btn) { btn.textContent = "Updating..."; btn.disabled = true; }
 
     try {
+        const selectedAvailability = document.getElementById('edit_status').value || 'In Stock';
+        const workflowStatus = selectedAvailability.toLowerCase() === 'pending' ? 'Pending' : 'Approved';
+        const category = document.getElementById('edit_category').value || 'General';
+        const usesSizeStocks = isSizedCategory(category);
+        const rawSizeStocks = readSizeStocks('edit_size_stock_section');
+        const sizeStocks = usesSizeStocks ? rawSizeStocks : null;
+        const uploadedImages = files.length ? await uploadProductImages(files, name) : [];
+        const imageUrls = uploadedImages.length ? uploadedImages : (product.imageUrls || product.photoURLs || [product.Image || product.imageUrl || product.photoURL].filter(Boolean));
+        const totalStock = stock !== ''
+            ? Number(stock)
+            : usesSizeStocks
+                ? Object.values(rawSizeStocks).reduce((sum, value) => sum + (Number(value) || 0), 0)
+                : 1;
+        const condition = getSelectedCondition('edit_condition');
+        const recipient = document.getElementById('edit_recipient').value.trim() || getCurrentAdminName();
+        const departmentTag = document.getElementById('edit_department_tag').value.trim();
+        if (!condition) throw new Error("Please select a condition.");
         const productData = {
-            Product: name, Price: Number(price), Stock: Number(stock) || 0,
-            Category: document.getElementById('edit_category').value || 'General', 
-            Status: document.getElementById('edit_status').value || 'In Stock',
-            Recipient: document.getElementById('edit_recipient').value || '', 
-            Description: document.getElementById('edit_desc').value || ''
+            Product: name,
+            name,
+            Price: Number(price),
+            price: Number(price),
+            Stock: Number(totalStock) || 0,
+            Stock_count: Number(totalStock) || 0,
+            stockCount: Number(totalStock) || 0,
+            stock: Number(totalStock) || 0,
+            Category: category, 
+            category,
+            DepartmentTag: departmentTag,
+            departmentTag,
+            Status: workflowStatus,
+            approvalStatus: workflowStatus,
+            Availability: selectedAvailability === 'Pending' ? 'In Stock' : selectedAvailability,
+            availability: (selectedAvailability === 'Pending' ? 'In Stock' : selectedAvailability).toLowerCase().replace(/\s+/g, '-'),
+            Recipient: recipient, 
+            displayVendor: recipient,
+            recipientName: recipient,
+            Description: document.getElementById('edit_desc').value || '',
+            description: document.getElementById('edit_desc').value || '',
+            Condition: condition,
+            condition,
+            SizeStocks: sizeStocks,
+            sizeStocks,
+            sellerId: product.sellerId || getMobileSellerUid(product) || (auth.currentUser ? auth.currentUser.uid : ''),
+            ownerId: product.ownerId || product.sellerId || getMobileSellerUid(product) || (auth.currentUser ? auth.currentUser.uid : ''),
+            uid: product.uid || product.ownerId || product.sellerId || getMobileSellerUid(product) || (auth.currentUser ? auth.currentUser.uid : ''),
+            itemType: product.itemType || 'Physical Item',
+            fulfillmentType: product.fulfillmentType || 'Campus Pick-up',
+            listingId: product.listingId || product.productId || product.id,
+            sourcePath: product.sourcePath || product.path || '',
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            ...buildProductImageFields(imageUrls, name)
         };
+        productData.WorkflowStatus = productData.Status;
 
-        if (file) productData.Image = await uploadToCloudinary(file);
+        if (product.source === 'MobilePending') {
+            productData.name = productData.Product;
+            productData.price = productData.Price;
+            productData.category = productData.Category;
+            productData.status = productData.Status.toLowerCase();
+            productData.availability = productData.Availability.toLowerCase().replace(/\s+/g, '-');
+            productData.recipientName = productData.Recipient;
+            productData.description = productData.Description;
+            productData.condition = productData.Condition;
+            productData.stock_count = productData.Stock_count;
+        }
 
-        await db.collection('products').doc(id).update(productData);
+        if (!product.path) throw new Error("Product path is missing.");
+        await db.doc(product.path).update(productData);
         await logAction("Updated Product", `Item: ${name} (ID: ${id.substring(0,6)})`);
         
         alert("Product Updated Successfully!");
@@ -802,17 +2058,112 @@ window.updateExistingProduct = async function() {
     } finally { if (btn) { btn.textContent = "Update Product"; btn.disabled = false; } }
 };
 
-window.approveProduct = async function(id, name) {
-    if(confirm(`Approve "${name}" and publish it?`)) {
-        try { await db.collection('products').doc(id).update({ Status: 'In Stock' }); await logAction("Approved Product", `Published item: ${name}`); } 
-        catch (error) { alert("Error approving: " + error.message); }
+window.approveProduct = async function(fullPath, name) {
+    if(!fullPath || fullPath === 'undefined') return alert("Error: Database path missing.");
+
+    if(confirm(`Approve "${name}"?`)) {
+        try { 
+            const isMobilePending = fullPath.startsWith('products_pending/');
+            const docRef = db.doc(fullPath);
+            const snap = await docRef.get();
+            if (!snap.exists) throw new Error("Product document not found.");
+
+            const product = normalizeProduct(snap, isMobilePending ? 'MobilePending' : 'ApprovedMarketplace');
+            const approvalData = {
+                ...buildMobileWorkflowUpdate('approved', 'In Stock'),
+                approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            if (isMobilePending) {
+                const sellerUid = getMobileSellerUid({ ...snap.data(), ...product });
+                const productId = getMobileProductId(snap, product);
+                if (!sellerUid) throw new Error("Missing sellerUid for approved mobile product.");
+
+                const batch = db.batch();
+                const sellerDocRef = db.doc(getMobileSellerProductPath(sellerUid, productId));
+                const approvedDocRef = db.collection('products_approved').doc(productId);
+                const approvedCopy = {
+                    ...buildApprovedProductCopy({ ...snap.data(), ...product, ...approvalData }, productId),
+                    sourcePath: fullPath,
+                    sellerUid,
+                    sellerId: sellerUid
+                };
+
+                batch.update(docRef, {
+                    ...approvalData,
+                    verified: true,
+                    sellerUid,
+                    sellerId: sellerUid,
+                    productId
+                });
+                batch.set(sellerDocRef, {
+                    ...approvalData,
+                    verified: true,
+                    sellerUid,
+                    sellerId: sellerUid,
+                    productId
+                }, { merge: true });
+                batch.set(approvedDocRef, approvedCopy, { merge: true });
+                await batch.commit();
+            } else {
+                await docRef.update(approvalData);
+            }
+
+            await logAction("Approved Product", `Item: ${name}`, "Audit"); 
+            alert("Listing is now LIVE.");
+        } catch (error) { alert("Error: " + error.message); }
     }
 };
 
-window.rejectProduct = async function(id, name) {
-    if(confirm(`Reject and delete "${name}"? This cannot be undone.`)) {
-        try { await db.collection('products').doc(id).delete(); await logAction("Rejected Product", `Deleted submission: ${name}`); } 
-        catch (error) { alert("Error rejecting: " + error.message); }
+window.rejectProduct = async function(fullPath, name) {
+    if(confirm(`Reject "${name}"?`)) {
+        try { 
+            const isMobilePending = fullPath.startsWith('products_pending/');
+            const docRef = db.doc(fullPath);
+            const snap = await docRef.get();
+            if (!snap.exists) throw new Error("Product document not found.");
+
+            const rejectData = {
+                ...buildMobileWorkflowUpdate('rejected', 'Out of Stock'),
+                rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            if (isMobilePending) {
+                const sellerUid = getMobileSellerUid({ ...snap.data(), ...normalizeProduct(snap, 'MobilePending') });
+                const productId = getMobileProductId(snap, snap.data());
+                if (!sellerUid) throw new Error("Missing sellerUid for rejected mobile product.");
+
+                const batch = db.batch();
+                const sellerDocRef = db.doc(getMobileSellerProductPath(sellerUid, productId));
+                const rejectedProductData = {
+                    ...snap.data(),
+                    ...rejectData,
+                    id: productId,
+                    productId,
+                    sellerUid,
+                    sellerId: sellerUid
+                };
+
+                batch.update(docRef, {
+                    ...rejectData,
+                    sellerUid,
+                    sellerId: sellerUid,
+                    productId
+                });
+                batch.set(sellerDocRef, {
+                    ...rejectData,
+                    sellerUid,
+                    sellerId: sellerUid,
+                    productId
+                }, { merge: true });
+                await batch.commit();
+            } else {
+                await docRef.update(rejectData);
+            }
+
+            await logAction("Rejected Product", `Item: ${name}`, "Audit"); 
+            alert("Listing was rejected.");
+        } catch (error) { alert("Error: " + error.message); }
     }
 };
 
@@ -835,26 +2186,56 @@ window.saveFinancialRecord = async function() {
 };
 
 window.saveNewUser = async function() {
-    const em = document.getElementById('u_email').value; const pa = document.getElementById('u_pass').value; const nm = document.getElementById('u_name').value;
-    if (!nm || !em || !pa) return alert("Missing fields");
+    const em = document.getElementById('u_email').value.trim();
+    const nm = document.getElementById('u_name').value.trim();
+    const phone = document.getElementById('u_phone').value.trim();
+    if (!nm || !em || !phone) return alert("Please fill in name, email, and phone.");
     const btn = document.querySelector('#addUserModal button.bg-primary'); btn.textContent = "Creating..."; btn.disabled = true;
     let secApp = null;
     try {
         secApp = firebase.initializeApp(firebaseConfig, "Secondary");
-        const cred = await secApp.auth().createUserWithEmailAndPassword(em, pa);
+        const tempPassword = generateTemporaryPassword();
+        const generatedUID = await generateUniqueUserIdentifier();
+        const cred = await secApp.auth().createUserWithEmailAndPassword(em, tempPassword);
+        await cred.user.sendEmailVerification();
+        await secApp.auth().sendPasswordResetEmail(em);
+
         await db.collection('users').doc(cred.user.uid).set({
-            name: nm, email: em, role: document.getElementById('u_role').value, userType: document.getElementById('u_type').value, course: document.getElementById('u_course').value,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(), status: 'Active', verified: true
+            UID: generatedUID,
+            uid: cred.user.uid,
+            authUid: cred.user.uid,
+            name: nm,
+            email: em,
+            phone,
+            role: 'student',
+            status: 'unverified',
+            verified: false,
+            emailVerified: false,
+            usertype: 'user',
+            userType: 'user',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         await logAction("Created User", `Name: ${nm} (${em})`);
-        await secApp.auth().signOut(); alert("User Created!"); closeAndClearModal('addUserModal');
+        await secApp.auth().signOut();
+        alert("User created. Verification and password setup emails were sent.");
+        closeAndClearModal('addUserModal');
     } catch (e) { alert("Error: " + e.message); } finally { if(secApp) secApp.delete(); btn.textContent = "Create User"; btn.disabled = false; }
 };
 
 window.saveVerifiedUser = async function() {
     const uid = document.getElementById('v_uid').value; const nm = document.getElementById('v_name').value;
     if(!nm) return alert("Please confirm the user's name");
-    await db.collection('users').doc(uid).update({ name: nm, userType: document.getElementById('v_type').value, role: document.getElementById('v_role').value, verified: true, status: 'Active' });
+    await db.collection('users').doc(uid).update({
+        name: nm,
+        userType: document.getElementById('v_type').value,
+        usertype: String(document.getElementById('v_type').value || '').toLowerCase(),
+        role: String(document.getElementById('v_role').value || '').toLowerCase(),
+        verified: 'verified',
+        emailVerified: true,
+        status: 'active',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
     await logAction("Verified User", `User: ${nm} (ID: ${uid})`); closeModal('verifyUserModal'); alert("User Verified.");
 };
 
@@ -870,12 +2251,42 @@ window.saveMyProfile = async function() {
     } catch(e) { alert(e.message); } finally { btn.textContent = "Update Profile"; btn.disabled = false; }
 };
 
-window.deleteItem = async function(collection, id) {
+window.deleteItem = async function(docPath, itemName = 'this record') {
     if(confirm("Are you sure you want to delete this record?")) {
         try { 
-            await db.collection(collection).doc(id).delete(); 
-            // Add "Audit" here:
-            await logAction("Deleted Item", `Collection: ${collection}, ID: ${id}`, "Audit"); 
+            const isProductPath = /^products_|^seller_products\/|^vendor_products\/|^products_pending\/|^products_approved\//.test(docPath || '');
+            if (!isProductPath) {
+                await db.doc(docPath).delete();
+                await logAction("Deleted Item", `Path: ${docPath}${itemName ? `, Item: ${itemName}` : ''}`, "Audit");
+                return;
+            }
+
+            const product = globalProducts.find(p =>
+                p.path === docPath ||
+                `products_pending/${p.id}` === docPath ||
+                `products_approved/${p.id}` === docPath
+            );
+
+            const productId = product?.productId || product?.id || String(docPath).split('/').pop();
+            const sellerUid = getMobileSellerUid(product || {});
+            const deleteTargets = new Set([
+                docPath,
+                `products_approved/${productId}`,
+                `products_pending/${productId}`
+            ]);
+
+            if (sellerUid) {
+                deleteTargets.add(`seller_products/${sellerUid}/products/${productId}`);
+                deleteTargets.add(`vendor_products/${sellerUid}/products/${productId}`);
+            }
+
+            const batch = db.batch();
+            Array.from(deleteTargets).filter(Boolean).forEach(path => {
+                batch.delete(db.doc(path));
+            });
+            await batch.commit();
+
+            await logAction("Deleted Item", `Paths: ${Array.from(deleteTargets).join(', ')}${itemName ? `, Item: ${itemName}` : ''}`, "Audit"); 
         } 
         catch (error) { alert("Error deleting: " + error.message); }
     }
@@ -907,6 +2318,28 @@ async function uploadToCloudinary(file) {
     } catch (err) { throw err; }
 }
 
+function generateTemporaryPassword(length = 18) {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+    const values = new Uint32Array(length);
+    crypto.getRandomValues(values);
+    return Array.from(values, value => alphabet[value % alphabet.length]).join('');
+}
+
+async function generateUniqueUserIdentifier() {
+    let candidate = '';
+
+    do {
+        const rawId = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`)
+            .replace(/-/g, '')
+            .toUpperCase()
+            .slice(0, 20);
+        candidate = `USR-${rawId}`;
+
+        const existing = await db.collection('users').where('UID', '==', candidate).limit(1).get();
+        if (existing.empty) return candidate;
+    } while (true);
+}
+
 
 // ==========================================
 // 8. UI & MODAL HELPERS 
@@ -931,7 +2364,7 @@ window.switchView = function(viewName) {
 
     if(viewName === 'transactions') { triggerSkeleton('tbody-transactions', 10, 8); renderTransactions(); }
     if(viewName === 'logs') { triggerSkeleton('tbody-logs', 10, 4); renderLogs(); }
-    if(viewName === 'allItems') { triggerSkeleton('tbody-all-items', 8, 7); renderProducts(); }
+    if(viewName === 'allItems') { triggerSkeleton('tbody-all-items', 8, 7); switchInventoryTab(currentInventoryTab || 'verified'); }
     if(viewName === 'schoolListings') { triggerSkeleton('tbody-school-listings', 8, 5); renderSchoolListings(); }
     if(viewName === 'pendingApprovals') { triggerSkeleton('tbody-pending-approvals', 4, 5); renderPendingApprovals(); }
     if(viewName === 'inbox') { renderInbox(); } 
@@ -964,11 +2397,26 @@ window.switchUserTab = function(type) {
     const tBody = document.getElementById('tbody-' + type); if(tBody) tBody.classList.remove('hidden');
 };
 
+window.switchInventoryTab = function(type) {
+    currentInventoryTab = type;
+    document.querySelectorAll('[id^="inventory-tab-"]').forEach(btn => {
+        btn.className = 'pb-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 cursor-pointer';
+    });
+    const activeBtn = document.getElementById('inventory-tab-' + type);
+    if (activeBtn) activeBtn.className = 'pb-3 text-sm font-bold border-b-2 border-[#852221] text-[#852221] cursor-pointer';
+    renderProducts();
+};
+
 window.openAddProductModal = function() {
     editingProductId = null; 
     document.querySelector('#addItemModal h3').innerText = "Add New Product";
-    const saveBtn = document.querySelector('#addItemModal button.bg-[#852221]');
+    const saveBtn = document.querySelector('#addItemModal button[onclick="saveNewProduct()"]');
     if (saveBtn) saveBtn.textContent = "Save Product";
+    document.getElementById('inp_recipient').value = getCurrentAdminName();
+    document.getElementById('inp_department_tag').value = '';
+    setConditionSelection('inp_condition', 'Brand New');
+    toggleSizeStockSection('inp');
+    renderImagePreview('inp_preview', []);
     openModal('addItemModal');
 };
 
@@ -997,10 +2445,46 @@ window.closeAndClearModal = function(id) {
     document.querySelectorAll(`#${id} select`).forEach(s => s.selectedIndex = 0);
     const mArea = document.querySelector(`#${id} .media-upload-area`);
     if(mArea) { mArea.innerHTML = `<i data-lucide="image" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i><span class="text-xs text-gray-500">Click to Upload Image</span>`; if(window.lucide) lucide.createIcons(); }
+    const preview = document.querySelector(`#${id} .image-preview-grid`);
+    if (preview) preview.innerHTML = '';
+    if (id === 'addItemModal') {
+        document.getElementById('inp_recipient').value = getCurrentAdminName();
+        document.getElementById('inp_department_tag').value = '';
+        setConditionSelection('inp_condition', 'Brand New');
+        populateSizeStocks('inp_size_stock_section', {});
+        toggleSizeStockSection('inp');
+    }
+    if (id === 'editItemModal') {
+        setConditionSelection('edit_condition', '');
+        populateSizeStocks('edit_size_stock_section', {});
+        toggleSizeStockSection('edit');
+    }
     closeModal(id);
 };
 
-window.openVerifyModal = function(uid, email) { document.getElementById('v_uid').value = uid; document.getElementById('v_email').value = email; openModal('verifyUserModal'); };
+window.openVerifyModal = function(uid, email) {
+    const user = globalUsers.find(item => (item.id || item.uid) === uid) || {};
+    document.getElementById('v_uid').value = uid;
+    document.getElementById('v_email').value = email;
+    document.getElementById('v_name').value = user.name || '';
+
+    const typeValue = getUserTypeLabel(user).toLowerCase();
+    const roleValue = String(user.role || 'student').toLowerCase();
+    const typeSelect = document.getElementById('v_type');
+    const roleSelect = document.getElementById('v_role');
+
+    if (typeSelect) {
+        const matchedType = Array.from(typeSelect.options).find(option => option.value.toLowerCase() === typeValue);
+        typeSelect.value = matchedType ? matchedType.value : 'Customer';
+    }
+
+    if (roleSelect) {
+        const matchedRole = Array.from(roleSelect.options).find(option => option.value.toLowerCase() === roleValue);
+        roleSelect.value = matchedRole ? matchedRole.value : 'User';
+    }
+
+    openModal('verifyUserModal');
+};
 window.openMyProfile = function() {
     const u = auth.currentUser;
     if(u) {
@@ -1035,8 +2519,11 @@ function setupSearch() {
         const table = document.querySelector('.view-section:not(.hidden) table');
         if (table) { const term = e.target.value.toLowerCase(); table.querySelectorAll('tbody tr').forEach(r => r.style.display = r.innerText.toLowerCase().includes(term) ? '' : 'none'); }
     });
+    document.getElementById('ticketSearch')?.addEventListener('input', () => {
+        renderInbox();
+    });
     document.getElementById('productSearch')?.addEventListener('input', (e) => {
-        document.querySelectorAll('#allItemsTable tbody tr').forEach(r => r.style.display = r.innerText.toLowerCase().includes(e.target.value.toLowerCase()) ? '' : 'none');
+        document.querySelectorAll('#tbody-all-items tr').forEach(r => r.style.display = r.innerText.toLowerCase().includes(e.target.value.toLowerCase()) ? '' : 'none');
     });
     document.getElementById('userManagementSearch')?.addEventListener('input', (e) => {
         if (!document.getElementById('tbody-customers').classList.contains('hidden')) {
@@ -1046,24 +2533,26 @@ function setupSearch() {
 }
 
 window.viewProductDetails = function(id) {
-    const p = globalProducts.find(x => x.id === id);
+    const p = getProductById(id);
     if (!p) return;
 
     // Fill Modal Data
-    document.getElementById('detail-img').src = p.Image || `https://ui-avatars.com/api/?name=${p.Product}&background=eee`;
-    document.getElementById('detail-name').innerText = p.Product || 'Unnamed Item';
+    document.getElementById('detail-img').src = getProductImage(p);
+    document.getElementById('detail-name').innerText = getProductName(p);
     document.getElementById('detail-id').innerText = `#${p.id.toUpperCase()}`;
-    document.getElementById('detail-category').innerText = p.Category || 'General';
-    document.getElementById('detail-price').innerText = `₱${(p.Price || 0).toLocaleString()}`;
-    document.getElementById('detail-stock').innerText = `${p.Stock || 0} units`;
-    document.getElementById('detail-recipient').innerText = p.Recipient || '--';
-    document.getElementById('detail-status').innerText = p.Status || 'In Stock';
+    document.getElementById('detail-category').innerText = getProductCategory(p) || 'General';
+    document.getElementById('detail-price').innerText = `₱${getProductPrice(p).toLocaleString()}`;
+    document.getElementById('detail-stock').innerText = hasNumericStock(p) ? `${Number(p.Stock) || 0} units` : getProductStockDisplay(p);
+    document.getElementById('detail-recipient').innerText = getProductRecipient(p);
+    document.getElementById('detail-status').innerText = `${p.WorkflowStatus || p.Status || 'Unknown'} | ${p.Availability || 'In Stock'}`;
+    document.getElementById('detail-desc').innerText = p.Description || 'No description provided.';
     
-    // The missing piece: The Description
-    const descEl = document.getElementById('detail-desc');
-    descEl.innerText = p.Description && p.Description.trim() !== "" ? p.Description : "This item has no additional administrative notes or description.";
+    // FIX: Look for both database fields
+    const allocatedField = document.getElementById('detail-recipient');
+    if (allocatedField) {
+        allocatedField.innerText = getProductRecipient(p);
+    }
 
-    if(window.lucide) lucide.createIcons();
     openModal('productDetailModal');
 };
 
@@ -1113,23 +2602,45 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSearch();
     
     // Handle Add and Edit Image Previews Dynamically
-    ['inp_file', 'edit_file'].forEach(fileId => {
-        const input = document.getElementById(fileId);
+    [
+        { inputId: 'inp_file', previewId: 'inp_preview' },
+        { inputId: 'edit_file', previewId: 'edit_preview' }
+    ].forEach(({ inputId, previewId }) => {
+        const input = document.getElementById(inputId);
         if (input) {
             input.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if(file) { 
-                    const reader = new FileReader(); 
-                    reader.onload = (ev) => {
-                        const area = input.previousElementSibling;
-                        if(area && area.classList.contains('media-upload-area')) {
-                            area.innerHTML = `<img src="${ev.target.result}" class="w-full h-32 object-contain rounded-lg">`; 
-                        }
-                    }; 
-                    reader.readAsDataURL(file); 
-                }
+                const files = Array.from(e.target.files || []).slice(0, 3);
+                const readers = files.map(file => new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onload = ev => resolve(ev.target.result);
+                    reader.readAsDataURL(file);
+                }));
+
+                Promise.all(readers).then(images => renderImagePreview(previewId, images));
             });
         }
+    });
+
+    ['inp_price', 'edit_price'].forEach(inputId => {
+        const input = document.getElementById(inputId);
+        if (input) {
+            input.addEventListener('blur', () => {
+                input.value = formatCurrencyInputValue(input.value);
+            });
+        }
+    });
+
+    ['inp_category', 'edit_category'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        if (select) select.addEventListener('change', () => toggleSizeStockSection(selectId.startsWith('inp') ? 'inp' : 'edit'));
+    });
+
+    document.querySelectorAll('.condition-choice').forEach(input => {
+        input.addEventListener('change', () => {
+            const groupName = input.name;
+            if (input.checked) setConditionSelection(groupName, input.value);
+            else setConditionSelection(groupName, '');
+        });
     });
     
     // Profile Avatar Preview
